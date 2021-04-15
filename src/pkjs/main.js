@@ -1,4 +1,5 @@
 var Settings = require('pebblejs/settings');
+var Vibe = require('pebblejs/ui/vibe');
 const { PebblifyCard, PebblifyMenu } = require('./windows');
 
 const {
@@ -114,16 +115,99 @@ class NowPlayingCard extends PebblifyCard {
           }
         }
       }
+    }
     });
 
     this.on('longClick', (event) => {
+      if (this.isActiveSession) {
+        let playbackAction;
+        let httpMethod;
+        // let makeCall = true;
+
+        httpMethod = 'POST'
+
+        switch (event.button) {
+          case PEBBLE_ACTIONS.UP:
+            if (this.currentSession.actions.disallows.skipping_prev) {
+              Vibe.vibrate('double');
+              this.action({
+                up: 'IMAGE_ICON_DISMISS',
+              });
+              
+            } else {
+              playbackAction = 'previous'
+              Vibe.vibrate('short');
+
+              this.action({
+                up: 'IMAGE_MUSIC_ICON_BACKWARD',
+              });
+            }
+            break;
+          case PEBBLE_ACTIONS.SELECT:
+            if (!this.toolsActionsMode) {
+              this.toolsActionsMode = true;
+              Vibe.vibrate('short');
+            }
+            break;
+          case PEBBLE_ACTIONS.DOWN:
+            if (this.currentSession.actions.disallows.skipping_next) {
+              Vibe.vibrate('double');
+              this.action({
+                down: 'IMAGE_ICON_DISMISS',
+              });
+
+            } else {
+              playbackAction = 'next';
+              Vibe.vibrate('short');
+
+              this.action({
+                down: 'IMAGE_MUSIC_ICON_FORWARD',
+              });
+            }
+            break;
+          default:
+            break;
+
+        }
+
+        if (playbackAction) {
+
+          let volumePercent = 0;
+          volumePercent = this.currentSession.device.volume_percent;
+
+          console.log(`Sending command ${playbackAction} with method ${httpMethod}`);
+
+          spotifyAuth.makeCall(
+            `${API_PATHS.PLAYER}/${playbackAction}${playbackAction == 'volume'
+              ? `?volume_percent=${volumePercent}`
+              : ''
+            }`,
+            (data) => {
+              this.refresh();
+            },
+            (response) => {
+              if (response.data) {
       if (
-        this.isActiveSession &&
-        event.button == PEBBLE_ACTIONS.SELECT &&
-        !this.toolsActionsMode &&
-        !this.volumeActionsMode
+                  response.data.error.status == 404 &&
+                  response.data.error.reason == 'NO_ACTIVE_DEVICE'
       ) {
-        this.toolsActionsMode = true;
+                  // refresh & session is not active
+                  console.log(`Request error status: ${response.data.error.status} | reason: ${response.data.error.reason}`);
+                  this.isActiveSession = false;
+                } else {
+                  this.isActiveSession = true;
+                  this.refresh();
+                }
+              } else {
+                console.log(`Command ${playbackAction} sent OK`)
+                this.isActiveSession = true;
+                this.refresh();
+              }
+            },
+            {},
+            httpMethod
+          );
+        }
       }
     });
   }
