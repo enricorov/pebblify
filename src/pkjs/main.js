@@ -19,7 +19,7 @@ class NowPlayingCard extends PebblifyCard {
   constructor() {
     super();
     this._isActiveSession = false;
-    this._volumeActionsMode = false;
+    // this._volumeActionsMode = true;
     this._toolsActionsMode = false;
 
     this.subtitleColor(COLOR_BLACK);
@@ -41,7 +41,8 @@ class NowPlayingCard extends PebblifyCard {
         let httpMethod;
         let makeCall = true;
 
-        if (this.volumeActionsMode) {
+        if (this.toolsActionsMode) {
+        } else {
           httpMethod = 'put';
           switch (event.button) {
             case PEBBLE_ACTIONS.UP:
@@ -58,23 +59,6 @@ class NowPlayingCard extends PebblifyCard {
             default:
               break;
           }
-        } else if (this.toolsActionsMode) {
-        } else {
-          httpMethod = 'POST';
-          switch (event.button) {
-            case PEBBLE_ACTIONS.UP:
-              playbackAction = 'previous';
-              break;
-            case PEBBLE_ACTIONS.SELECT:
-              this.volumeActionsMode = true;
-              break;
-            case PEBBLE_ACTIONS.DOWN:
-              playbackAction = 'next';
-              break;
-            default:
-              break;
-          }
-        }
 
         if (playbackAction) {
           let volumePercent = 0;
@@ -155,17 +139,35 @@ class NowPlayingCard extends PebblifyCard {
     this._currentSession = sessionData;
   }
 
-  get volumeActionsMode() {
-    return this._volumeActionsMode;
-  }
+  // get volumeActionsMode() {
+  //   return this._volumeActionsMode;
+  // }
 
+  // /**
+  //  * @param {boolean} isVolumeActionsMode
+  //  */
+  // set volumeActionsMode(isVolumeActionsMode) {
+  //   this._volumeActionsMode = isVolumeActionsMode;
+
+  //   if (isVolumeActionsMode) {
+  //     this.action({
+  //       up: 'IMAGE_MUSIC_ICON_VOLUME_UP',
+  // select: this.currentSession.is_playing
+  //   ? 'IMAGE_MUSIC_ICON_PAUSE'
+  //   : 'IMAGE_MUSIC_ICON_PLAY',
+  //       down: 'IMAGE_MUSIC_ICON_VOLUME_DOWN',
+  //     });
+
+  //     setTimeout(() => {
+  //       this._volumeActionsMode = true;
+  //       this.setDefaultActionsMode();
+  //     }, 2000);
+  //   }
+  // }
   /**
-   * @param {boolean} isVolumeActionsMode
+   * Sets the card actions to Vol UP, Pause, Vol DOWN
    */
-  set volumeActionsMode(isVolumeActionsMode) {
-    this._volumeActionsMode = isVolumeActionsMode;
-
-    if (isVolumeActionsMode) {
+  setDefaultActionsMode() {
       this.action({
         up: 'IMAGE_MUSIC_ICON_VOLUME_UP',
         select: this.currentSession.is_playing
@@ -174,11 +176,6 @@ class NowPlayingCard extends PebblifyCard {
         down: 'IMAGE_MUSIC_ICON_VOLUME_DOWN',
       });
 
-      setTimeout(() => {
-        this._volumeActionsMode = false;
-        this.setDefaultActionsMode();
-      }, 2000);
-    }
   }
 
   get toolsActionsMode() {
@@ -205,20 +202,6 @@ class NowPlayingCard extends PebblifyCard {
     }
   }
 
-  /**
-   * Sets the card actions to Previous, Ellipsis, Next
-   */
-  setDefaultActionsMode() {
-    this.action({
-      up: this.currentSession.actions.disallows.skipping_prev
-        ? false
-        : 'IMAGE_MUSIC_ICON_BACKWARD',
-      select: 'IMAGE_MUSIC_ICON_ELLIPSIS',
-      down: this.currentSession.actions.disallows.skipping_next
-        ? false
-        : 'IMAGE_MUSIC_ICON_FORWARD',
-    });
-  }
 
   get isActiveSession() {
     return this._isActiveSession;
@@ -282,7 +265,7 @@ class NowPlayingCard extends PebblifyCard {
 
         this.backgroundColor(SPOTIFY_GREEN);
 
-        if (!this.volumeActionsMode && !this.toolsActionsMode) {
+        if (!this.toolsActionsMode) {
           this.setDefaultActionsMode();
         }
       },
