@@ -34,8 +34,8 @@ const API_PATHS = {
 };
 
 // Pebblify
-const SPOTIFY_GREEN = Feature.color('jaeger-green', 'black');
-const SPOTIFY_BLUE = Feature.color('blue-moon', 'black');
+const SPOTIFY_GREEN = Feature.color('jaeger-green', 'white');
+const SPOTIFY_BLUE = Feature.color('blue-moon', 'white');
 const COLOR_BLACK = 'black';
 const COLOR_WHITE = 'white';
 
