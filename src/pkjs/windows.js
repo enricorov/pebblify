@@ -26,6 +26,7 @@ class PebblifyMenu extends UI.Menu {
       backgroundColor: COLOR_BLACK,
       textColor: COLOR_WHITE,
       highlightBackgroundColor: SPOTIFY_GREEN,
+      highlightTextColor: COLOR_BLACK
     });
   }
 }
