@@ -82,8 +82,8 @@ class NowPlayingCard extends PebblifyCard {
             volumePercent = this.currentSession.device.volume_percent;
             volumePercent =
               event.button == PEBBLE_ACTIONS.UP
-                ? volumePercent + 10
-                : volumePercent - 10;
+                ? volumePercent + 2
+                : volumePercent - 2;
 
             // volumePercent must be between 0 and 100
             if (volumePercent < 0 || volumePercent > 100) {
