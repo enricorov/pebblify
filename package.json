@@ -6,10 +6,8 @@
     "pebble-app"
   ],
   "private": true,
-  "type": "module",
   "dependencies": {
-    "axios": "^0.21.1",
-    "pebblejs": "^1.0.0"
+    "axios": "^0.21.1"
   },
   "pebble": {
     "displayName": "Pebblify",
@@ -26,8 +24,13 @@
       "watchface": false
     },
     "messageKeys": [
-      "AppMsgTestOne",
-      "AppMsgTestTwo"
+      "AUTH_REQUEST",
+      "AUTH_SUCCESS", 
+      "AUTH_ERROR",
+      "TOKEN_REFRESH",
+      "API_CALL",
+      "API_RESPONSE",
+      "API_ERROR"
     ],
     "resources": {
       "media": [
