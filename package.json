@@ -31,7 +31,10 @@
       "TOKEN_REFRESH",
       "API_CALL",
       "API_RESPONSE",
-      "API_ERROR"
+      "API_ERROR",
+      "ACCESS_TOKEN",
+      "REFRESH_TOKEN",
+      "EXPIRES_AT"
     ],
     "resources": {
       "media": [

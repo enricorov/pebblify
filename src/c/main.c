@@ -577,7 +577,8 @@ static void request_authentication(void) {
   DictionaryIterator *iter;
   app_message_outbox_begin(&iter);
   
-  dict_write_uint8(iter, 0, 0); // AUTH_REQUEST message type
+  // Send message_type as a string key with integer value
+  dict_write_uint8(iter, 0, 0); // AUTH_REQUEST = 0
   
   app_message_outbox_send();
 }
@@ -586,16 +587,18 @@ static void handle_auth_success(DictionaryIterator *iter) {
   s_app_data.auth_state = AUTH_STATE_AUTHENTICATED;
   s_app_data.is_authenticated = true;
   
-  // Extract tokens from message
-  Tuple *access_token_tuple = dict_find(iter, 1);
-  Tuple *refresh_token_tuple = dict_find(iter, 2);
-  Tuple *expires_at_tuple = dict_find(iter, 3);
+  // Extract tokens from message using the correct numeric keys
+  Tuple *access_token_tuple = dict_find(iter, 7); // ACCESS_TOKEN
+  Tuple *refresh_token_tuple = dict_find(iter, 8); // REFRESH_TOKEN
+  Tuple *expires_at_tuple = dict_find(iter, 9);   // EXPIRES_AT
   
   if (access_token_tuple) {
     strncpy(s_app_data.access_token, access_token_tuple->value->cstring, sizeof(s_app_data.access_token) - 1);
+    s_app_data.access_token[sizeof(s_app_data.access_token) - 1] = '\0';
   }
   if (refresh_token_tuple) {
     strncpy(s_app_data.refresh_token, refresh_token_tuple->value->cstring, sizeof(s_app_data.refresh_token) - 1);
+    s_app_data.refresh_token[sizeof(s_app_data.refresh_token) - 1] = '\0';
   }
   if (expires_at_tuple) {
     s_app_data.token_expires_at = expires_at_tuple->value->uint32;
@@ -714,26 +717,20 @@ static void handle_api_error(DictionaryIterator *iter) {
 }
 
 static void app_message_handler(DictionaryIterator *iter, void *context) {
-  Tuple *message_type_tuple = dict_find(iter, 0);
-  if (!message_type_tuple) {
-    return;
-  }
+  // Check for different message types by looking at the keys
+  Tuple *auth_success_tuple = dict_find(iter, 1); // AUTH_SUCCESS
+  Tuple *auth_error_tuple = dict_find(iter, 2);   // AUTH_ERROR
+  Tuple *api_response_tuple = dict_find(iter, 5); // API_RESPONSE
+  Tuple *api_error_tuple = dict_find(iter, 6);    // API_ERROR
   
-  uint8_t message_type = message_type_tuple->value->uint8;
-  
-  switch (message_type) {
-    case 1: // AUTH_SUCCESS
-      handle_auth_success(iter);
-      break;
-    case 2: // AUTH_ERROR
-      handle_auth_error(iter);
-      break;
-    case 5: // API_RESPONSE
-      handle_api_response(iter);
-      break;
-    case 6: // API_ERROR
-      handle_api_error(iter);
-      break;
+  if (auth_success_tuple) {
+    handle_auth_success(iter);
+  } else if (auth_error_tuple) {
+    handle_auth_error(iter);
+  } else if (api_response_tuple) {
+    handle_api_response(iter);
+  } else if (api_error_tuple) {
+    handle_api_error(iter);
   }
 }
 

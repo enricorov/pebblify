@@ -45,16 +45,17 @@ SpotifyAuth.prototype.setupAppMessageHandlers = function() {
   Pebble.addEventListener('appmessage', function(e) {
     var message = e.payload;
     
-    switch (message.message_type) {
-      case MESSAGE_KEYS.AUTH_REQUEST:
-        self.handleAuthRequest();
-        break;
-      case MESSAGE_KEYS.TOKEN_REFRESH:
-        self.refreshAccessToken();
-        break;
-      case MESSAGE_KEYS.API_CALL:
-        self.handleApiCall(message);
-        break;
+    // Check for AUTH_REQUEST (key 0)
+    if (message[0] !== undefined) {
+      self.handleAuthRequest();
+    }
+    // Check for TOKEN_REFRESH (key 3)
+    else if (message[3] !== undefined) {
+      self.refreshAccessToken();
+    }
+    // Check for API_CALL (key 4)
+    else if (message[4] !== undefined) {
+      self.handleApiCall(message);
     }
   });
 };
@@ -231,30 +232,30 @@ SpotifyAuth.prototype.pkceChallengeFromVerifier = function(verifier) {
 // Message sending functions
 SpotifyAuth.prototype.sendAuthSuccess = function() {
   Pebble.sendAppMessage({
-    message_type: MESSAGE_KEYS.AUTH_SUCCESS,
-    access_token: this.accessToken,
-    refresh_token: this.refreshToken,
-    expires_at: this.tokenExpiresAt
+    1: 1, // AUTH_SUCCESS key
+    7: this.accessToken, // ACCESS_TOKEN key
+    8: this.refreshToken, // REFRESH_TOKEN key
+    9: this.tokenExpiresAt // EXPIRES_AT key
   });
 };
 
 SpotifyAuth.prototype.sendAuthError = function(error) {
   Pebble.sendAppMessage({
-    message_type: MESSAGE_KEYS.AUTH_ERROR,
+    2: 1, // AUTH_ERROR key
     error: error
   });
 };
 
 SpotifyAuth.prototype.sendApiResponse = function(data) {
   Pebble.sendAppMessage({
-    message_type: MESSAGE_KEYS.API_RESPONSE,
+    5: 1, // API_RESPONSE key
     data: JSON.stringify(data)
   });
 };
 
 SpotifyAuth.prototype.sendApiError = function(error) {
   Pebble.sendAppMessage({
-    message_type: MESSAGE_KEYS.API_ERROR,
+    6: 1, // API_ERROR key
     error: error
   });
 };
