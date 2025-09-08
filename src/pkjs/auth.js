@@ -1,5 +1,7 @@
 // Spotify Authentication for Pebblify C App
 const axios = require('axios');
+require('pebblejs')
+// var Settings = require('pebblejs/settings')
 
 // Spotify API constants
 const CLIENT_ID = '152d31f9089d4be0b6605671dae99c3f';
@@ -33,6 +35,7 @@ class SpotifyAuth {
     this.refreshToken = null;
     this.tokenExpiresAt = null;
     this.setupAppMessageHandlers();
+    this.initSettingsPage();
   }
 
   setupAppMessageHandlers() {
@@ -54,6 +57,74 @@ class SpotifyAuth {
     });
   }
 
+  initSettingsPage() {
+    var self = this;
+    var authUrl = this.getAuthorizationUrl();
+    
+    return Pebble.Settings.config({
+      url: authUrl,
+      autosave: false,
+      hash: true,
+    }, function(e) {
+      console.log('opening configurable');
+    }, function(e) {
+      if (e.options.hasOwnProperty('/?code')) {
+        // user accepted authorization, code received
+        var pkceCode = e.options['/?code'];
+        self.getToken(pkceCode);
+      } else if (e.options.hasOwnProperty('/?error')) {
+        // user closed authorization url
+        console.log('User closed Spotify authorize url');
+      }
+      if (e.failed) {
+        console.log('PARSING FAILED - Response:');
+        console.log(e.response);
+      }
+    });
+  }
+
+  getAuthorizationUrl() {
+    // Create and store a random "state" value
+    var state = this.generateRandomString(16);
+    localStorage.setItem('pkceState', state);
+
+    // Create and store a new PKCE code_verifier (the plaintext random secret)
+    var codeVerifier = this.generateRandomString(128);
+    localStorage.setItem('pkceCodeVerifier', codeVerifier);
+
+    // Hash and base64-urlencode the secret to use as the challenge
+    var codeChallenge = this.pkceChallengeFromVerifier(codeVerifier);
+
+    return ACCOUNTS_BASE_URL + '/authorize?client_id=' + CLIENT_ID + '&redirect_uri=' + encodeURIComponent(PEBBLE_REDIRECT_URI) + '&scope=' + encodeURIComponent(SCOPES.join(' ')) + '&code_challenge=' + codeChallenge + '&code_challenge_method=S256&state=123&response_type=code';
+  }
+
+  getToken(pkceCode) {
+    var self = this;
+    var codeVerifier = localStorage.getItem('pkceCodeVerifier');
+    var body = 'client_id=' + CLIENT_ID + '&redirect_uri=' + encodeURIComponent(PEBBLE_REDIRECT_URI) + '&code_verifier=' + codeVerifier + '&code=' + pkceCode + '&grant_type=authorization_code';
+
+    axios.post(ACCOUNTS_BASE_URL + '/api/token', body, {
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+    }).then(function(response) {
+      var userTokens = response.data;
+      userTokens.expiration_date = Date.now() + userTokens.expires_in * 1000;
+
+      localStorage.setItem('userTokens', JSON.stringify(userTokens));
+      self.accessToken = userTokens.access_token;
+      self.refreshToken = userTokens.refresh_token;
+      self.tokenExpiresAt = userTokens.expiration_date;
+      
+      self.sendAuthSuccess();
+    }).catch(function(data) {
+      if (data.error == 'invalid_grant') {
+        // Authorization code expired
+        console.log('User must relaunch Pebblify settings app');
+      }
+    });
+  }
+
   handleAuthRequest() {
     // Check if we already have valid tokens
     if (this.accessToken && this.tokenExpiresAt && Date.now() < this.tokenExpiresAt) {
@@ -61,81 +132,10 @@ class SpotifyAuth {
       return;
     }
 
-    // Generate PKCE parameters
-    const codeVerifier = this.generateRandomString(128);
-    const codeChallenge = this.pkceChallengeFromVerifier(codeVerifier);
-    const state = this.generateRandomString(16);
-
-    // Store PKCE parameters
-    localStorage.setItem('pkce_code_verifier', codeVerifier);
-    localStorage.setItem('pkce_state', state);
-
-    // Build authorization URL
-    var authUrl = ACCOUNTS_BASE_URL + '/authorize?' +
-      'client_id=' + CLIENT_ID + '&' +
-      'redirect_uri=' + encodeURIComponent(PEBBLE_REDIRECT_URI) + '&' +
-      'scope=' + encodeURIComponent(SCOPES.join(' ')) + '&' +
-      'code_challenge=' + codeChallenge + '&' +
-      'code_challenge_method=S256&' +
-      'state=' + state + '&' +
-      'response_type=code';
-
-    // Open authorization URL
-    Pebble.openURL(authUrl);
+    // Open settings page for authentication
+    Pebble.Settings.open();
   }
 
-  handleAuthCallback(url) {
-    const urlParams = new URLSearchParams(url.split('?')[1]);
-    const code = urlParams.get('code');
-    const state = urlParams.get('state');
-    const error = urlParams.get('error');
-
-    if (error) {
-      this.sendAuthError(error);
-      return;
-    }
-
-    if (!code || state !== localStorage.getItem('pkce_state')) {
-      this.sendAuthError('Invalid authorization response');
-      return;
-    }
-
-    // Exchange code for tokens
-    this.exchangeCodeForTokens(code);
-  }
-
-  exchangeCodeForTokens(code) {
-    var self = this;
-    var codeVerifier = localStorage.getItem('pkce_code_verifier');
-    
-    axios.post(ACCOUNTS_BASE_URL + '/api/token', 
-      'client_id=' + CLIENT_ID + '&' +
-      'redirect_uri=' + encodeURIComponent(PEBBLE_REDIRECT_URI) + '&' +
-      'code_verifier=' + codeVerifier + '&' +
-      'code=' + code + '&' +
-      'grant_type=authorization_code',
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
-        }
-      }
-    ).then(function(response) {
-      var tokens = response.data;
-      self.accessToken = tokens.access_token;
-      self.refreshToken = tokens.refresh_token;
-      self.tokenExpiresAt = Date.now() + (tokens.expires_in * 1000);
-
-      // Store tokens
-      localStorage.setItem('spotify_access_token', self.accessToken);
-      localStorage.setItem('spotify_refresh_token', self.refreshToken);
-      localStorage.setItem('spotify_token_expires_at', self.tokenExpiresAt);
-
-      self.sendAuthSuccess();
-    }).catch(function(error) {
-      console.error('Token exchange failed:', error);
-      self.sendAuthError('Failed to exchange authorization code');
-    });
-  }
 
   refreshAccessToken() {
     var self = this;
@@ -252,22 +252,23 @@ class SpotifyAuth {
 
   // Load stored tokens on startup
   loadStoredTokens() {
-    this.accessToken = localStorage.getItem('spotify_access_token');
-    this.refreshToken = localStorage.getItem('spotify_refresh_token');
-    this.tokenExpiresAt = parseInt(localStorage.getItem('spotify_token_expires_at'));
+    var userTokensStr = localStorage.getItem('userTokens');
+    if (userTokensStr) {
+      try {
+        var userTokens = JSON.parse(userTokensStr);
+        this.accessToken = userTokens.access_token;
+        this.refreshToken = userTokens.refresh_token;
+        this.tokenExpiresAt = userTokens.expiration_date;
+      } catch (e) {
+        console.error('Failed to parse stored tokens:', e);
+      }
+    }
   }
 }
 
 // Initialize authentication when app starts
-Pebble.addEventListener('ready', () => {
-  const auth = new SpotifyAuth();
+Pebble.addEventListener('ready', function() {
+  var auth = new SpotifyAuth();
   auth.loadStoredTokens();
-  
-  // Handle URL callbacks from OAuth flow
-  Pebble.addEventListener('webviewclosed', (e) => {
-    if (e.url) {
-      auth.handleAuthCallback(e.url);
-    }
-  });
 });
 
