@@ -1,7 +1,7 @@
 // Spotify Authentication for Pebblify C App
 const axios = require('axios');
-require('pebblejs')
-// var Settings = require('pebblejs/settings')
+require('pebblejs');
+var Settings = require('pebblejs/settings');
 
 // Spotify API constants
 const CLIENT_ID = '152d31f9089d4be0b6605671dae99c3f';
@@ -31,11 +31,13 @@ const MESSAGE_KEYS = {
 
 class SpotifyAuth {
   constructor() {
+    console.log('SpotifyAuth constructor called');
     this.accessToken = null;
     this.refreshToken = null;
     this.tokenExpiresAt = null;
     this.setupAppMessageHandlers();
     this.initSettingsPage();
+    console.log('SpotifyAuth constructor completed');
   }
 
   setupAppMessageHandlers() {
@@ -58,19 +60,23 @@ class SpotifyAuth {
   }
 
   initSettingsPage() {
+    console.log('initSettingsPage called');
     var self = this;
     var authUrl = this.getAuthorizationUrl();
+    console.log('Authorization URL:', authUrl);
     
-    return Pebble.Settings.config({
+    Settings.config({
       url: authUrl,
       autosave: false,
       hash: true,
     }, function(e) {
       console.log('opening configurable');
     }, function(e) {
+      console.log('Settings callback received:', e);
       if (e.options.hasOwnProperty('/?code')) {
         // user accepted authorization, code received
         var pkceCode = e.options['/?code'];
+        console.log('Authorization code received:', pkceCode);
         self.getToken(pkceCode);
       } else if (e.options.hasOwnProperty('/?error')) {
         // user closed authorization url
@@ -126,14 +132,18 @@ class SpotifyAuth {
   }
 
   handleAuthRequest() {
+    console.log('handleAuthRequest called');
+    
     // Check if we already have valid tokens
     if (this.accessToken && this.tokenExpiresAt && Date.now() < this.tokenExpiresAt) {
+      console.log('Already authenticated, sending success');
       this.sendAuthSuccess();
       return;
     }
 
+    console.log('Opening settings for authentication');
     // Open settings page for authentication
-    Pebble.Settings.open();
+    Settings.open();
   }
 
 
@@ -268,7 +278,9 @@ class SpotifyAuth {
 
 // Initialize authentication when app starts
 Pebble.addEventListener('ready', function() {
+  console.log('Pebble ready event fired');
   var auth = new SpotifyAuth();
   auth.loadStoredTokens();
+  console.log('Auth initialized');
 });
 
