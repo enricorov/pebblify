@@ -229,7 +229,7 @@ SpotifyAuth.prototype.handleApiCall = function(message) {
     data: data
   }).then(function(response) {
     console.log('API call successful:', response.data);
-    self.sendApiResponse(response.data);
+    self.sendParsedNowPlayingData(response.data);
   }).catch(function(error) {
     console.error('API call failed:', error);
     
@@ -297,6 +297,56 @@ SpotifyAuth.prototype.sendApiResponse = function(data) {
   Pebble.sendAppMessage({
     5: 1, // API_RESPONSE key
     14: JSON.stringify(data) // RESPONSE_DATA key
+  });
+};
+
+SpotifyAuth.prototype.sendParsedNowPlayingData = function(data) {
+  console.log('Parsing now playing data:', data);
+  
+  // Parse the Spotify API response
+  var trackName = '';
+  var artistName = '';
+  var isPlaying = false;
+  var volumePercent = 50;
+  var canSkipPrev = true;
+  var canSkipNext = true;
+  
+  if (data && data.item) {
+    trackName = data.item.name || '';
+    if (data.item.artists && data.item.artists.length > 0) {
+      artistName = data.item.artists[0].name || '';
+    }
+  }
+  
+  if (data) {
+    isPlaying = data.is_playing || false;
+    if (data.device && data.device.volume_percent !== undefined) {
+      volumePercent = data.device.volume_percent;
+    }
+    if (data.actions && data.actions.disallows) {
+      canSkipPrev = !data.actions.disallows.skipping_prev;
+      canSkipNext = !data.actions.disallows.skipping_next;
+    }
+  }
+  
+  console.log('Parsed data:', {
+    trackName: trackName,
+    artistName: artistName,
+    isPlaying: isPlaying,
+    volumePercent: volumePercent,
+    canSkipPrev: canSkipPrev,
+    canSkipNext: canSkipNext
+  });
+  
+  // Send parsed data to C app
+  Pebble.sendAppMessage({
+    5: 1, // API_RESPONSE key
+    15: trackName, // TRACK_NAME key
+    16: artistName, // ARTIST_NAME key
+    17: isPlaying ? 1 : 0, // IS_PLAYING key
+    18: volumePercent, // VOLUME_PERCENT key
+    19: canSkipPrev ? 1 : 0, // CAN_SKIP_PREV key
+    20: canSkipNext ? 1 : 0 // CAN_SKIP_NEXT key
   });
 };
 

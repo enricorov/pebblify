@@ -369,8 +369,10 @@ static void now_playing_handle_action(ButtonId button) {
       switch (button) {
         case BUTTON_ID_UP:
           // Volume up
-          s_app_data.volume_percent = (s_app_data.volume_percent + 2 > 100) ? 100 : s_app_data.volume_percent + 2;
+          s_app_data.volume_percent = (s_app_data.volume_percent + 10 > 100) ? 100 : s_app_data.volume_percent + 10;
           set_volume(s_app_data.volume_percent);
+          // Refresh now playing data after volume change
+          app_timer_register(500, (AppTimerCallback)refresh_now_playing, NULL);
           break;
         case BUTTON_ID_SELECT:
           // Play/pause
@@ -378,8 +380,10 @@ static void now_playing_handle_action(ButtonId button) {
           break;
         case BUTTON_ID_DOWN:
           // Volume down
-          s_app_data.volume_percent = (s_app_data.volume_percent - 2 < 0) ? 0 : s_app_data.volume_percent - 2;
+          s_app_data.volume_percent = (s_app_data.volume_percent - 10 < 0) ? 0 : s_app_data.volume_percent - 10;
           set_volume(s_app_data.volume_percent);
+          // Refresh now playing data after volume change
+          app_timer_register(500, (AppTimerCallback)refresh_now_playing, NULL);
           break;
         default:
           break;
@@ -627,79 +631,55 @@ static void handle_auth_error(DictionaryIterator *iter) {
 }
 
 static void handle_api_response(DictionaryIterator *iter) {
-  Tuple *data_tuple = dict_find(iter, 14); // RESPONSE_DATA key
-  if (data_tuple) {
-    // Parse JSON response and update now playing data
-    const char *json_data = data_tuple->value->cstring;
-    APP_LOG(APP_LOG_LEVEL_INFO, "Received API response: %s", json_data);
-    
-    // Simple JSON parsing for basic fields
-    // Look for "is_playing" field
-    const char *is_playing_pos = strstr(json_data, "\"is_playing\":");
-    if (is_playing_pos) {
-      s_app_data.is_playing = (strstr(is_playing_pos, "true") != NULL);
-    }
-    
-    // Look for "item" -> "name" field (track name)
-    const char *item_pos = strstr(json_data, "\"item\":");
-    if (item_pos) {
-      const char *name_pos = strstr(item_pos, "\"name\":");
-      if (name_pos) {
-        const char *quote_start = strchr(name_pos + 7, '"');
-        if (quote_start) {
-          const char *quote_end = strchr(quote_start + 1, '"');
-          if (quote_end) {
-            int len = quote_end - quote_start - 1;
-            if (len > 0 && (size_t)len < sizeof(s_app_data.track_name)) {
-              strncpy(s_app_data.track_name, quote_start + 1, len);
-              s_app_data.track_name[len] = '\0';
-            }
-          }
-        }
-      }
-      
-      // Look for "artists" array -> first artist name
-      const char *artists_pos = strstr(item_pos, "\"artists\":");
-      if (artists_pos) {
-        const char *artist_name_pos = strstr(artists_pos, "\"name\":");
-        if (artist_name_pos) {
-          const char *quote_start = strchr(artist_name_pos + 7, '"');
-          if (quote_start) {
-            const char *quote_end = strchr(quote_start + 1, '"');
-            if (quote_end) {
-            int len = quote_end - quote_start - 1;
-            if (len > 0 && (size_t)len < sizeof(s_app_data.artist_name)) {
-              strncpy(s_app_data.artist_name, quote_start + 1, len);
-              s_app_data.artist_name[len] = '\0';
-            }
-            }
-          }
-        }
-      }
-    }
-    
-    // Look for "device" -> "volume_percent"
-    const char *device_pos = strstr(json_data, "\"device\":");
-    if (device_pos) {
-      const char *volume_pos = strstr(device_pos, "\"volume_percent\":");
-      if (volume_pos) {
-        s_app_data.volume_percent = atoi(volume_pos + 16);
-      }
-    }
-    
-    // Look for "actions" -> "disallows"
-    const char *actions_pos = strstr(json_data, "\"actions\":");
-    if (actions_pos) {
-      s_app_data.can_skip_prev = (strstr(actions_pos, "\"skipping_prev\"") == NULL);
-      s_app_data.can_skip_next = (strstr(actions_pos, "\"skipping_next\"") == NULL);
-    }
-    
-    s_app_data.is_active_session = true;
-    
-    // Update display if now playing window is active
-    if (s_app_data.now_playing_window) {
-      now_playing_update_display();
-    }
+  APP_LOG(APP_LOG_LEVEL_INFO, "Received API response");
+  
+  // Get parsed data from JavaScript
+  Tuple *track_name_tuple = dict_find(iter, 15); // TRACK_NAME key
+  Tuple *artist_name_tuple = dict_find(iter, 16); // ARTIST_NAME key
+  Tuple *is_playing_tuple = dict_find(iter, 17); // IS_PLAYING key
+  Tuple *volume_tuple = dict_find(iter, 18); // VOLUME_PERCENT key
+  Tuple *can_skip_prev_tuple = dict_find(iter, 19); // CAN_SKIP_PREV key
+  Tuple *can_skip_next_tuple = dict_find(iter, 20); // CAN_SKIP_NEXT key
+  
+  // Update track name
+  if (track_name_tuple) {
+    strncpy(s_app_data.track_name, track_name_tuple->value->cstring, sizeof(s_app_data.track_name) - 1);
+    s_app_data.track_name[sizeof(s_app_data.track_name) - 1] = '\0';
+    APP_LOG(APP_LOG_LEVEL_INFO, "Track name: %s", s_app_data.track_name);
+  }
+  
+  // Update artist name
+  if (artist_name_tuple) {
+    strncpy(s_app_data.artist_name, artist_name_tuple->value->cstring, sizeof(s_app_data.artist_name) - 1);
+    s_app_data.artist_name[sizeof(s_app_data.artist_name) - 1] = '\0';
+    APP_LOG(APP_LOG_LEVEL_INFO, "Artist name: %s", s_app_data.artist_name);
+  }
+  
+  // Update playing status
+  if (is_playing_tuple) {
+    s_app_data.is_playing = (is_playing_tuple->value->uint8 == 1);
+    APP_LOG(APP_LOG_LEVEL_INFO, "Is playing: %s", s_app_data.is_playing ? "true" : "false");
+  }
+  
+  // Update volume
+  if (volume_tuple) {
+    s_app_data.volume_percent = volume_tuple->value->uint8;
+    APP_LOG(APP_LOG_LEVEL_INFO, "Volume: %d%%", s_app_data.volume_percent);
+  }
+  
+  // Update skip permissions
+  if (can_skip_prev_tuple) {
+    s_app_data.can_skip_prev = (can_skip_prev_tuple->value->uint8 == 1);
+  }
+  if (can_skip_next_tuple) {
+    s_app_data.can_skip_next = (can_skip_next_tuple->value->uint8 == 1);
+  }
+  
+  s_app_data.is_active_session = true;
+  
+  // Update display if now playing window is active
+  if (s_app_data.now_playing_window) {
+    now_playing_update_display();
   }
 }
 
@@ -724,13 +704,18 @@ static void app_message_handler(DictionaryIterator *iter, void *context) {
   Tuple *api_response_tuple = dict_find(iter, 5); // API_RESPONSE
   Tuple *api_error_tuple = dict_find(iter, 6);    // API_ERROR
   
+  APP_LOG(APP_LOG_LEVEL_INFO, "Message received - auth_success: %d, auth_error: %d, api_response: %d, api_error: %d", 
+          auth_success_tuple ? 1 : 0, auth_error_tuple ? 1 : 0, api_response_tuple ? 1 : 0, api_error_tuple ? 1 : 0);
+  
   if (auth_success_tuple) {
     handle_auth_success(iter);
   } else if (auth_error_tuple) {
     handle_auth_error(iter);
   } else if (api_response_tuple) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "Handling API response");
     handle_api_response(iter);
   } else if (api_error_tuple) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "Handling API error");
     handle_api_error(iter);
   }
 }
@@ -764,6 +749,7 @@ static void make_spotify_api_call(const char *path, const char *method, const ch
 }
 
 static void refresh_now_playing(void) {
+  APP_LOG(APP_LOG_LEVEL_INFO, "refresh_now_playing called");
   make_spotify_api_call("/me/player", "GET", NULL);
 }
 
@@ -772,14 +758,20 @@ static void play_pause_track(void) {
   char path[64];
   snprintf(path, sizeof(path), "/me/player/%s", action);
   make_spotify_api_call(path, "PUT", NULL);
+  // Refresh now playing data after play/pause
+  app_timer_register(500, (AppTimerCallback)refresh_now_playing, NULL);
 }
 
 static void skip_to_next(void) {
   make_spotify_api_call("/me/player/next", "POST", NULL);
+  // Refresh now playing data after skipping
+  app_timer_register(500, (AppTimerCallback)refresh_now_playing, NULL);
 }
 
 static void skip_to_previous(void) {
   make_spotify_api_call("/me/player/previous", "POST", NULL);
+  // Refresh now playing data after skipping
+  app_timer_register(500, (AppTimerCallback)refresh_now_playing, NULL);
 }
 
 static void set_volume(int volume_percent) {
@@ -787,3 +779,4 @@ static void set_volume(int volume_percent) {
   snprintf(path, sizeof(path), "/me/player/volume?volume_percent=%d", volume_percent);
   make_spotify_api_call(path, "PUT", NULL);
 }
+

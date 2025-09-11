@@ -39,7 +39,13 @@
       "HTTP_METHOD",
       "API_DATA",
       "ERROR_MESSAGE",
-      "RESPONSE_DATA"
+      "RESPONSE_DATA",
+      "TRACK_NAME",
+      "ARTIST_NAME",
+      "IS_PLAYING",
+      "VOLUME_PERCENT",
+      "CAN_SKIP_PREV",
+      "CAN_SKIP_NEXT"
     ],
     "resources": {
       "media": [
