@@ -106,6 +106,42 @@ int main(void) {
   deinit_app();
 }
 
+static void save_auth_data(void) {
+  // Save authentication data to persistent storage
+  if (s_app_data.is_authenticated && strlen(s_app_data.access_token) > 0) {
+    persist_write_string(1, s_app_data.access_token);
+    persist_write_string(2, s_app_data.refresh_token);
+    persist_write_int(3, s_app_data.token_expires_at);
+    persist_write_bool(4, true);
+    APP_LOG(APP_LOG_LEVEL_INFO, "Authentication data saved to persistent storage");
+  }
+}
+
+static void load_auth_data(void) {
+  // Load authentication data from persistent storage
+  if (persist_exists(4) && persist_read_bool(4)) {
+    persist_read_string(1, s_app_data.access_token, sizeof(s_app_data.access_token));
+    persist_read_string(2, s_app_data.refresh_token, sizeof(s_app_data.refresh_token));
+    s_app_data.token_expires_at = persist_read_int(3);
+    s_app_data.is_authenticated = true;
+    s_app_data.auth_state = AUTH_STATE_AUTHENTICATED;
+    APP_LOG(APP_LOG_LEVEL_INFO, "Authentication data loaded from persistent storage");
+  } else {
+    s_app_data.is_authenticated = false;
+    s_app_data.auth_state = AUTH_STATE_NONE;
+    APP_LOG(APP_LOG_LEVEL_INFO, "No authentication data found in persistent storage");
+  }
+}
+
+static void clear_auth_data(void) {
+  // Clear authentication data from persistent storage
+  persist_delete(1);
+  persist_delete(2);
+  persist_delete(3);
+  persist_delete(4);
+  APP_LOG(APP_LOG_LEVEL_INFO, "Authentication data cleared from persistent storage");
+}
+
 static void init_app(void) {
   // Initialize app data
   memset(&s_app_data, 0, sizeof(AppData));
@@ -121,12 +157,25 @@ static void init_app(void) {
   const uint32_t outbox_size = 1024;
   app_message_open(inbox_size, outbox_size);
   
-  // Check if we have stored authentication tokens
-  // For now, assume we need authentication
-  s_app_data.auth_state = AUTH_STATE_NONE;
+  // Load authentication data from persistent storage
+  load_auth_data();
   
-  if (s_app_data.auth_state == AUTH_STATE_NONE) {
-    // Show authentication window
+  APP_LOG(APP_LOG_LEVEL_INFO, "Auth state after load: %d, is_authenticated: %s", 
+          s_app_data.auth_state, s_app_data.is_authenticated ? "true" : "false");
+  
+  // Always create main window first (this will be the base layer)
+  APP_LOG(APP_LOG_LEVEL_INFO, "Creating main window as base layer");
+  s_app_data.current_state = APP_STATE_MAIN_MENU;
+  s_app_data.main_window = window_create();
+  window_set_window_handlers(s_app_data.main_window, (WindowHandlers) {
+    .load = main_window_load,
+    .unload = main_window_unload,
+  });
+  window_stack_push(s_app_data.main_window, true);
+  
+  if (s_app_data.auth_state != AUTH_STATE_AUTHENTICATED) {
+    // Not authenticated - create auth window on top of main window
+    APP_LOG(APP_LOG_LEVEL_INFO, "Not authenticated, creating auth window on top");
     s_app_data.auth_window = window_create();
     window_set_window_handlers(s_app_data.auth_window, (WindowHandlers) {
       .load = auth_window_load,
@@ -134,14 +183,7 @@ static void init_app(void) {
     });
     window_stack_push(s_app_data.auth_window, true);
   } else {
-    // Show main menu
-    s_app_data.current_state = APP_STATE_MAIN_MENU;
-    s_app_data.main_window = window_create();
-    window_set_window_handlers(s_app_data.main_window, (WindowHandlers) {
-      .load = main_window_load,
-      .unload = main_window_unload,
-    });
-    window_stack_push(s_app_data.main_window, true);
+    APP_LOG(APP_LOG_LEVEL_INFO, "Already authenticated, main window is visible");
   }
 }
 
@@ -161,6 +203,7 @@ static void deinit_app(void) {
 }
 
 static void main_window_load(Window *window) {
+  APP_LOG(APP_LOG_LEVEL_INFO, "Main window load called");
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
   
@@ -545,6 +588,7 @@ static void request_authentication(void) {
 }
 
 static void handle_auth_success(DictionaryIterator *iter) {
+  APP_LOG(APP_LOG_LEVEL_INFO, "Authentication successful, switching to main menu");
   s_app_data.auth_state = AUTH_STATE_AUTHENTICATED;
   s_app_data.is_authenticated = true;
   
@@ -565,16 +609,20 @@ static void handle_auth_success(DictionaryIterator *iter) {
     s_app_data.token_expires_at = expires_at_tuple->value->uint32;
   }
   
-  // Switch to main menu
-  window_stack_pop_all(true);
-  s_app_data.current_state = APP_STATE_MAIN_MENU;
-  s_app_data.main_window = window_create();
-  window_set_window_handlers(s_app_data.main_window, (WindowHandlers) {
-    .load = main_window_load,
-    .unload = main_window_unload,
-  });
-  window_stack_push(s_app_data.main_window, true);
+  // Save authentication data to persistent storage
+  save_auth_data();
+  
+  // Simple approach: just pop the auth window (main menu is already underneath)
+  APP_LOG(APP_LOG_LEVEL_INFO, "Authentication successful, popping auth window");
+  
+  if (s_app_data.auth_window) {
+    window_stack_pop(true);
+    window_destroy(s_app_data.auth_window);
+    s_app_data.auth_window = NULL;
+    APP_LOG(APP_LOG_LEVEL_INFO, "Auth window popped and destroyed, main menu now visible");
+  }
 }
+
 
 static void handle_auth_error(DictionaryIterator *iter) {
   s_app_data.auth_state = AUTH_STATE_ERROR;
@@ -687,8 +735,10 @@ static void app_message_handler(DictionaryIterator *iter, void *context) {
           auth_success_tuple ? 1 : 0, auth_error_tuple ? 1 : 0, api_response_tuple ? 1 : 0, api_error_tuple ? 1 : 0);
   
   if (auth_success_tuple) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "Calling handle_auth_success");
     handle_auth_success(iter);
   } else if (auth_error_tuple) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "Calling handle_auth_error");
     handle_auth_error(iter);
   } else if (api_response_tuple) {
     APP_LOG(APP_LOG_LEVEL_INFO, "Handling API response");
@@ -696,6 +746,8 @@ static void app_message_handler(DictionaryIterator *iter, void *context) {
   } else if (api_error_tuple) {
     APP_LOG(APP_LOG_LEVEL_INFO, "Handling API error");
     handle_api_error(iter);
+  } else {
+    APP_LOG(APP_LOG_LEVEL_INFO, "Unknown message type received");
   }
 }
 
