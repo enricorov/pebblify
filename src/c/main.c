@@ -369,10 +369,17 @@ static void now_playing_handle_action(ButtonId button) {
       switch (button) {
         case BUTTON_ID_UP:
           // Volume up
-          s_app_data.volume_percent = (s_app_data.volume_percent + 10 > 100) ? 100 : s_app_data.volume_percent + 10;
-          set_volume(s_app_data.volume_percent);
-          // Refresh now playing data after volume change
-          app_timer_register(500, (AppTimerCallback)refresh_now_playing, NULL);
+          if (s_app_data.volume_percent < 100) {
+            s_app_data.volume_percent = (s_app_data.volume_percent + 2 > 100) ? 100 : s_app_data.volume_percent + 2;
+            APP_LOG(APP_LOG_LEVEL_INFO, "Volume up pressed, new volume: %d%%", s_app_data.volume_percent);
+            set_volume(s_app_data.volume_percent);
+            // Update display immediately to show new volume
+            now_playing_update_display();
+            // Refresh now playing data after volume change
+            app_timer_register(500, (AppTimerCallback)refresh_now_playing, NULL);
+          } else {
+            APP_LOG(APP_LOG_LEVEL_INFO, "Volume already at maximum");
+          }
           break;
         case BUTTON_ID_SELECT:
           // Play/pause
@@ -380,10 +387,17 @@ static void now_playing_handle_action(ButtonId button) {
           break;
         case BUTTON_ID_DOWN:
           // Volume down
-          s_app_data.volume_percent = (s_app_data.volume_percent - 10 < 0) ? 0 : s_app_data.volume_percent - 10;
-          set_volume(s_app_data.volume_percent);
-          // Refresh now playing data after volume change
-          app_timer_register(500, (AppTimerCallback)refresh_now_playing, NULL);
+          if (s_app_data.volume_percent > 0) {
+            s_app_data.volume_percent = (s_app_data.volume_percent - 2 < 0) ? 0 : s_app_data.volume_percent - 2;
+            APP_LOG(APP_LOG_LEVEL_INFO, "Volume down pressed, new volume: %d%%", s_app_data.volume_percent);
+            set_volume(s_app_data.volume_percent);
+            // Update display immediately to show new volume
+            now_playing_update_display();
+            // Refresh now playing data after volume change
+            app_timer_register(500, (AppTimerCallback)refresh_now_playing, NULL);
+          } else {
+            APP_LOG(APP_LOG_LEVEL_INFO, "Volume already at minimum");
+          }
           break;
         default:
           break;
@@ -686,10 +700,22 @@ static void handle_api_response(DictionaryIterator *iter) {
 static void handle_api_error(DictionaryIterator *iter) {
   Tuple *error_tuple = dict_find(iter, 13); // ERROR_MESSAGE key
   if (error_tuple) {
-    // Handle API error
-    s_app_data.is_active_session = false;
-    strcpy(s_app_data.track_name, "Error loading track");
-    strcpy(s_app_data.artist_name, "");
+    APP_LOG(APP_LOG_LEVEL_ERROR, "API Error: %s", error_tuple->value->cstring);
+    
+    // Check if this is a volume control error (403 Forbidden)
+    if (strstr(error_tuple->value->cstring, "403")) {
+      // Volume control failed - show a temporary message
+      strcpy(s_app_data.track_name, "Volume control not available");
+      strcpy(s_app_data.artist_name, "Device may not support volume control");
+      
+      // Auto-clear the error message after 3 seconds
+      app_timer_register(3000, (AppTimerCallback)refresh_now_playing, NULL);
+    } else {
+      // Other API errors
+      s_app_data.is_active_session = false;
+      strcpy(s_app_data.track_name, "Error loading track");
+      strcpy(s_app_data.artist_name, "");
+    }
     
     if (s_app_data.now_playing_window) {
       now_playing_update_display();
@@ -777,6 +803,7 @@ static void skip_to_previous(void) {
 static void set_volume(int volume_percent) {
   char path[128];
   snprintf(path, sizeof(path), "/me/player/volume?volume_percent=%d", volume_percent);
+  APP_LOG(APP_LOG_LEVEL_INFO, "Setting volume to %d%%", volume_percent);
   make_spotify_api_call(path, "PUT", NULL);
 }
 

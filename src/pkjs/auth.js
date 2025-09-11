@@ -320,8 +320,12 @@ SpotifyAuth.prototype.sendParsedNowPlayingData = function(data) {
   
   if (data) {
     isPlaying = data.is_playing || false;
+    console.log('Device data:', data.device);
     if (data.device && data.device.volume_percent !== undefined) {
       volumePercent = data.device.volume_percent;
+      console.log('Volume from API:', data.device.volume_percent, 'Type:', typeof data.device.volume_percent);
+    } else {
+      console.log('No device volume_percent found, using default:', volumePercent);
     }
     if (data.actions && data.actions.disallows) {
       canSkipPrev = !data.actions.disallows.skipping_prev;
@@ -338,8 +342,7 @@ SpotifyAuth.prototype.sendParsedNowPlayingData = function(data) {
     canSkipNext: canSkipNext
   });
   
-  // Send parsed data to C app
-  Pebble.sendAppMessage({
+  var messageToSend = {
     5: 1, // API_RESPONSE key
     15: trackName, // TRACK_NAME key
     16: artistName, // ARTIST_NAME key
@@ -347,7 +350,13 @@ SpotifyAuth.prototype.sendParsedNowPlayingData = function(data) {
     18: volumePercent, // VOLUME_PERCENT key
     19: canSkipPrev ? 1 : 0, // CAN_SKIP_PREV key
     20: canSkipNext ? 1 : 0 // CAN_SKIP_NEXT key
-  });
+  };
+  
+  console.log('Sending message to C app:', messageToSend);
+  console.log('Volume value being sent:', volumePercent, 'Type:', typeof volumePercent);
+  
+  // Send parsed data to C app
+  Pebble.sendAppMessage(messageToSend);
 };
 
 SpotifyAuth.prototype.sendApiError = function(error) {
