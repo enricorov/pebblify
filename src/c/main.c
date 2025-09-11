@@ -23,8 +23,7 @@ typedef enum {
 // Now playing control modes
 typedef enum {
   CONTROL_MODE_DEFAULT,
-  CONTROL_MODE_VOLUME,
-  CONTROL_MODE_TOOLS
+  CONTROL_MODE_VOLUME
 } ControlMode;
 
 typedef struct {
@@ -54,8 +53,7 @@ typedef struct {
   // Now playing UI elements
   TextLayer *track_layer;
   TextLayer *artist_layer;
-  TextLayer *status_layer;
-  Layer *display_layer;
+  ActionBarLayer *action_bar_layer;
 } AppData;
 
 static AppData s_app_data;
@@ -96,12 +94,10 @@ static void set_volume(int volume_percent);
 static void now_playing_window_load(Window *window);
 static void now_playing_window_unload(Window *window);
 static void now_playing_click_handler(ClickRecognizerRef recognizer, void *context);
-static void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *data);
 static void now_playing_click_config_provider(void *context);
 static void now_playing_update_display(void);
 static void now_playing_set_control_mode(ControlMode mode);
 static void now_playing_handle_action(ButtonId button);
-static void now_playing_display_update_proc(Layer *layer, GContext *ctx);
 
 int main(void) {
   init_app();
@@ -246,35 +242,27 @@ static void now_playing_window_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
   
-  // Set up click recognizer
-  window_set_click_config_provider(window, now_playing_click_config_provider);
+  // Create ActionBarLayer
+  s_app_data.action_bar_layer = action_bar_layer_create();
+  action_bar_layer_add_to_window(s_app_data.action_bar_layer, window);
   
-  // Create display layer
-  s_app_data.display_layer = layer_create(bounds);
-  layer_set_update_proc(s_app_data.display_layer, now_playing_display_update_proc);
-  layer_add_child(window_layer, s_app_data.display_layer);
+  // Set up ActionBarLayer click handlers
+  action_bar_layer_set_click_config_provider(s_app_data.action_bar_layer, now_playing_click_config_provider);
   
-  // Create text layers
-  s_app_data.track_layer = text_layer_create(GRect(10, 20, bounds.size.w - 20, 30));
+  // Create text layers for track info (ActionBarLayer takes up right side)
+  s_app_data.track_layer = text_layer_create(GRect(10, 20, bounds.size.w - ACTION_BAR_WIDTH - 20, 30));
   text_layer_set_text_alignment(s_app_data.track_layer, GTextAlignmentCenter);
   text_layer_set_font(s_app_data.track_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
   text_layer_set_text_color(s_app_data.track_layer, GColorWhite);
   text_layer_set_background_color(s_app_data.track_layer, GColorClear);
   layer_add_child(window_layer, text_layer_get_layer(s_app_data.track_layer));
   
-  s_app_data.artist_layer = text_layer_create(GRect(10, 50, bounds.size.w - 20, 25));
+  s_app_data.artist_layer = text_layer_create(GRect(10, 50, bounds.size.w - ACTION_BAR_WIDTH - 20, 25));
   text_layer_set_text_alignment(s_app_data.artist_layer, GTextAlignmentCenter);
   text_layer_set_font(s_app_data.artist_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
   text_layer_set_text_color(s_app_data.artist_layer, GColorWhite);
   text_layer_set_background_color(s_app_data.artist_layer, GColorClear);
   layer_add_child(window_layer, text_layer_get_layer(s_app_data.artist_layer));
-  
-  s_app_data.status_layer = text_layer_create(GRect(10, 120, bounds.size.w - 20, 30));
-  text_layer_set_text_alignment(s_app_data.status_layer, GTextAlignmentCenter);
-  text_layer_set_font(s_app_data.status_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
-  text_layer_set_text_color(s_app_data.status_layer, GColorWhite);
-  text_layer_set_background_color(s_app_data.status_layer, GColorClear);
-  layer_add_child(window_layer, text_layer_get_layer(s_app_data.status_layer));
   
   // Initialize now playing data
   s_app_data.is_active_session = false;
@@ -305,24 +293,15 @@ static void now_playing_window_unload(Window *window) {
     text_layer_destroy(s_app_data.artist_layer);
     s_app_data.artist_layer = NULL;
   }
-  if (s_app_data.status_layer) {
-    text_layer_destroy(s_app_data.status_layer);
-    s_app_data.status_layer = NULL;
-  }
-  if (s_app_data.display_layer) {
-    layer_destroy(s_app_data.display_layer);
-    s_app_data.display_layer = NULL;
+  if (s_app_data.action_bar_layer) {
+    action_bar_layer_destroy(s_app_data.action_bar_layer);
+    s_app_data.action_bar_layer = NULL;
   }
 }
 
 static void now_playing_click_config_provider(void *context) {
-  // Single click handler
-  window_single_click_subscribe(BUTTON_ID_UP, now_playing_click_handler);
-  window_single_click_subscribe(BUTTON_ID_SELECT, now_playing_click_handler);
-  window_single_click_subscribe(BUTTON_ID_DOWN, now_playing_click_handler);
-  
-  // Long click handler for tools mode
-  window_long_click_subscribe(BUTTON_ID_SELECT, 1000, now_playing_long_click_handler, NULL);
+  // Set up click handlers for the ActionBarLayer buttons
+  action_bar_layer_set_click_config_provider(s_app_data.action_bar_layer, now_playing_click_config_provider);
 }
 
 static void now_playing_click_handler(ClickRecognizerRef recognizer, void *context) {
@@ -330,11 +309,6 @@ static void now_playing_click_handler(ClickRecognizerRef recognizer, void *conte
   now_playing_handle_action(button);
 }
 
-static void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *data) {
-  if (s_app_data.is_active_session && s_app_data.control_mode == CONTROL_MODE_DEFAULT) {
-    now_playing_set_control_mode(CONTROL_MODE_TOOLS);
-  }
-}
 
 static void now_playing_handle_action(ButtonId button) {
   if (!s_app_data.is_active_session) {
@@ -405,27 +379,6 @@ static void now_playing_handle_action(ButtonId button) {
       // Auto-return to default mode after 2 seconds
       app_timer_register(2000, (AppTimerCallback)now_playing_set_control_mode, (void*)CONTROL_MODE_DEFAULT);
       break;
-      
-    case CONTROL_MODE_TOOLS:
-      switch (button) {
-        case BUTTON_ID_UP:
-          // Shuffle
-          // TODO: Make API call to toggle shuffle
-          break;
-        case BUTTON_ID_SELECT:
-          // Favorite
-          // TODO: Make API call to toggle favorite
-          break;
-        case BUTTON_ID_DOWN:
-          // More options
-          // TODO: Show more options
-          break;
-        default:
-          break;
-      }
-      // Auto-return to default mode after 2 seconds
-      app_timer_register(2000, (AppTimerCallback)now_playing_set_control_mode, (void*)CONTROL_MODE_DEFAULT);
-      break;
   }
   
   now_playing_update_display();
@@ -449,95 +402,34 @@ static void now_playing_update_display() {
     text_layer_set_text(s_app_data.artist_layer, s_app_data.artist_name);
   }
   
-  // Update status based on control mode
-  char status_text[64];
-  switch (s_app_data.control_mode) {
-    case CONTROL_MODE_DEFAULT:
-      snprintf(status_text, sizeof(status_text), "UP:Prev SEL:Vol DOWN:Next");
-      break;
-    case CONTROL_MODE_VOLUME:
-      snprintf(status_text, sizeof(status_text), "Vol: %d%% SEL:%s", 
-               s_app_data.volume_percent, s_app_data.is_playing ? "Pause" : "Play");
-      break;
-    case CONTROL_MODE_TOOLS:
-      snprintf(status_text, sizeof(status_text), "UP:Shuffle SEL:Fav DOWN:More");
-      break;
-  }
-  
-  if (s_app_data.status_layer) {
-    text_layer_set_text(s_app_data.status_layer, status_text);
-  }
-  
-  // Mark display layer for redraw
-  if (s_app_data.display_layer) {
-    layer_mark_dirty(s_app_data.display_layer);
+  // Update ActionBarLayer based on control mode
+  if (s_app_data.action_bar_layer) {
+    switch (s_app_data.control_mode) {
+      case CONTROL_MODE_DEFAULT:
+        // Previous, Play/Pause, Next
+        action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_UP, 
+          s_app_data.can_skip_prev ? gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_BACKWARD) : NULL);
+        action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_SELECT, 
+          gbitmap_create_with_resource(s_app_data.is_playing ? 
+            RESOURCE_ID_IMAGE_MUSIC_ICON_PAUSE : RESOURCE_ID_IMAGE_MUSIC_ICON_PLAY));
+        action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_DOWN, 
+          s_app_data.can_skip_next ? gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_FORWARD) : NULL);
+        break;
+        
+      case CONTROL_MODE_VOLUME:
+        // Volume Down, Play/Pause, Volume Up
+        action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_UP, 
+          gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_UP));
+        action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_SELECT, 
+          gbitmap_create_with_resource(s_app_data.is_playing ? 
+            RESOURCE_ID_IMAGE_MUSIC_ICON_PAUSE : RESOURCE_ID_IMAGE_MUSIC_ICON_PLAY));
+        action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_DOWN, 
+          gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_DOWN));
+        break;
+    }
   }
 }
 
-static void now_playing_display_update_proc(Layer *layer, GContext *ctx) {
-  GRect bounds = layer_get_bounds(layer);
-  
-  // Set background color (Spotify green)
-  graphics_context_set_fill_color(ctx, GColorJaegerGreen);
-  graphics_fill_rect(ctx, bounds, 0, GCornerNone);
-  
-  // Draw control icons based on mode
-  int icon_size = 20;
-  int icon_y = bounds.size.h - 40;
-  
-  switch (s_app_data.control_mode) {
-    case CONTROL_MODE_DEFAULT:
-      // Draw previous, play/pause, next icons
-      if (s_app_data.can_skip_prev) {
-        graphics_draw_bitmap_in_rect(ctx, 
-          gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_BACKWARD),
-          GRect(20, icon_y, icon_size, icon_size));
-      }
-      
-      graphics_draw_bitmap_in_rect(ctx, 
-        gbitmap_create_with_resource(s_app_data.is_playing ? 
-          RESOURCE_ID_IMAGE_MUSIC_ICON_PAUSE : RESOURCE_ID_IMAGE_MUSIC_ICON_PLAY),
-        GRect(bounds.size.w/2 - icon_size/2, icon_y, icon_size, icon_size));
-      
-      if (s_app_data.can_skip_next) {
-        graphics_draw_bitmap_in_rect(ctx, 
-          gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_FORWARD),
-          GRect(bounds.size.w - 40, icon_y, icon_size, icon_size));
-      }
-      break;
-      
-    case CONTROL_MODE_VOLUME:
-      // Draw volume up, play/pause, volume down icons
-      graphics_draw_bitmap_in_rect(ctx, 
-        gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_UP),
-        GRect(20, icon_y, icon_size, icon_size));
-      
-      graphics_draw_bitmap_in_rect(ctx, 
-        gbitmap_create_with_resource(s_app_data.is_playing ? 
-          RESOURCE_ID_IMAGE_MUSIC_ICON_PAUSE : RESOURCE_ID_IMAGE_MUSIC_ICON_PLAY),
-        GRect(bounds.size.w/2 - icon_size/2, icon_y, icon_size, icon_size));
-      
-      graphics_draw_bitmap_in_rect(ctx, 
-        gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_DOWN),
-        GRect(bounds.size.w - 40, icon_y, icon_size, icon_size));
-      break;
-      
-    case CONTROL_MODE_TOOLS:
-      // Draw shuffle, favorite, more icons
-      graphics_draw_bitmap_in_rect(ctx, 
-        gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_SHUFFLE),
-        GRect(20, icon_y, icon_size, icon_size));
-      
-      graphics_draw_bitmap_in_rect(ctx, 
-        gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_FAVORITE),
-        GRect(bounds.size.w/2 - icon_size/2, icon_y, icon_size, icon_size));
-      
-      graphics_draw_bitmap_in_rect(ctx, 
-        gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_ELLIPSIS),
-        GRect(bounds.size.w - 40, icon_y, icon_size, icon_size));
-      break;
-  }
-}
 
 // Authentication window implementation
 static void auth_window_load(Window *window) {
