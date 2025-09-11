@@ -627,10 +627,11 @@ static void handle_auth_error(DictionaryIterator *iter) {
 }
 
 static void handle_api_response(DictionaryIterator *iter) {
-  Tuple *data_tuple = dict_find(iter, 1);
+  Tuple *data_tuple = dict_find(iter, 14); // RESPONSE_DATA key
   if (data_tuple) {
     // Parse JSON response and update now playing data
     const char *json_data = data_tuple->value->cstring;
+    APP_LOG(APP_LOG_LEVEL_INFO, "Received API response: %s", json_data);
     
     // Simple JSON parsing for basic fields
     // Look for "is_playing" field
@@ -703,7 +704,7 @@ static void handle_api_response(DictionaryIterator *iter) {
 }
 
 static void handle_api_error(DictionaryIterator *iter) {
-  Tuple *error_tuple = dict_find(iter, 1);
+  Tuple *error_tuple = dict_find(iter, 13); // ERROR_MESSAGE key
   if (error_tuple) {
     // Handle API error
     s_app_data.is_active_session = false;
@@ -749,12 +750,15 @@ static void make_spotify_api_call(const char *path, const char *method, const ch
   DictionaryIterator *iter;
   app_message_outbox_begin(&iter);
   
-  dict_write_uint8(iter, 0, 4); // API_CALL message type
-  dict_write_cstring(iter, 1, path);
-  dict_write_cstring(iter, 2, method);
+  dict_write_uint8(iter, 4, 1); // API_CALL message type (key 4, value 1)
+  dict_write_cstring(iter, 10, path); // API_PATH (key 10)
+  dict_write_cstring(iter, 11, method); // HTTP_METHOD (key 11)
   if (data) {
-    dict_write_cstring(iter, 3, data);
+    dict_write_cstring(iter, 12, data); // API_DATA (key 12)
   }
+  
+  // Debug: Log the API call being made
+  APP_LOG(APP_LOG_LEVEL_INFO, "Making Spotify API call: %s %s", method, path);
   
   app_message_outbox_send();
 }

@@ -1,7 +1,8 @@
 // Spotify Authentication for Pebblify C App
 // Use native Pebble API instead of PebbleJS to avoid module loading issues
 var axios = require('axios');
-var Settings = require('pebblejs/settings')
+var Settings = require('pebblejs/settings');
+var sha256 = require('./sha256');
 
 // Spotify API constants
 var CLIENT_ID = '152d31f9089d4be0b6605671dae99c3f';
@@ -44,18 +45,25 @@ SpotifyAuth.prototype.setupAppMessageHandlers = function() {
   // Handle authentication requests from C app
   Pebble.addEventListener('appmessage', function(e) {
     var message = e.payload;
+    console.log('Received message from C app:', message);
     
     // Check for AUTH_REQUEST (key 0)
     if (message[0] !== undefined) {
+      console.log('Received AUTH_REQUEST');
       self.handleAuthRequest();
     }
     // Check for TOKEN_REFRESH (key 3)
     else if (message[3] !== undefined) {
+      console.log('Received TOKEN_REFRESH');
       self.refreshAccessToken();
     }
     // Check for API_CALL (key 4)
     else if (message[4] !== undefined) {
+      console.log('Received API_CALL');
       self.handleApiCall(message);
+    }
+    else {
+      console.log('Received unknown message type');
     }
   });
 };
@@ -107,15 +115,19 @@ SpotifyAuth.prototype.getAuthorizationUrl = function() {
 };
 
 SpotifyAuth.prototype.getToken = function(pkceCode) {
+  console.log('getToken called with code:', pkceCode);
   var self = this;
   var codeVerifier = localStorage.getItem('pkceCodeVerifier');
+  console.log('Using code verifier:', codeVerifier);
   var body = 'client_id=' + CLIENT_ID + '&redirect_uri=' + encodeURIComponent(PEBBLE_REDIRECT_URI) + '&code_verifier=' + codeVerifier + '&code=' + pkceCode + '&grant_type=authorization_code';
 
+  console.log('Making token request to:', ACCOUNTS_BASE_URL + '/api/token');
   axios.post(ACCOUNTS_BASE_URL + '/api/token', body, {
     headers: {
       'content-type': 'application/x-www-form-urlencoded',
     },
   }).then(function(response) {
+    console.log('Token response received:', response.data);
     var userTokens = response.data;
     userTokens.expiration_date = Date.now() + userTokens.expires_in * 1000;
 
@@ -124,8 +136,10 @@ SpotifyAuth.prototype.getToken = function(pkceCode) {
     self.refreshToken = userTokens.refresh_token;
     self.tokenExpiresAt = userTokens.expiration_date;
     
+    console.log('Tokens stored, calling sendAuthSuccess');
     self.sendAuthSuccess();
   }).catch(function(data) {
+    console.log('Token request failed:', data);
     if (data.error == 'invalid_grant') {
       // Authorization code expired
       console.log('User must relaunch Pebblify settings app');
@@ -190,21 +204,31 @@ SpotifyAuth.prototype.refreshAccessToken = function() {
 };
 
 SpotifyAuth.prototype.handleApiCall = function(message) {
+  console.log('handleApiCall called with message:', message);
   var self = this;
   if (!this.accessToken) {
+    console.log('No access token available');
     this.sendApiError('No access token available');
     return;
   }
 
+  // Extract API call details from message
+  var apiPath = message[10] || message.api_path;
+  var httpMethod = message[11] || message.http_method || 'GET';
+  var data = message[12] || message.data || {};
+  
+  console.log('Making API call:', httpMethod, API_BASE_URL + apiPath);
+  
   axios({
-    url: API_BASE_URL + message.api_path,
-    method: message.http_method || 'GET',
+    url: API_BASE_URL + apiPath,
+    method: httpMethod,
     headers: {
       'Authorization': 'Bearer ' + this.accessToken,
       'Content-Type': 'application/json'
     },
-    data: message.data || {}
+    data: data
   }).then(function(response) {
+    console.log('API call successful:', response.data);
     self.sendApiResponse(response.data);
   }).catch(function(error) {
     console.error('API call failed:', error);
@@ -233,20 +257,33 @@ SpotifyAuth.prototype.generateRandomString = function(length) {
 };
 
 SpotifyAuth.prototype.pkceChallengeFromVerifier = function(verifier) {
-  // Simple base64 encoding for PKCE (not cryptographically secure but works for demo)
-  // In production, you'd want to use proper SHA256
-  var encoded = btoa(verifier);
-  return encoded.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  // For PKCE with S256 method, hash the verifier with SHA256 and base64url encode
+  var encoder = new TextEncoder();
+  var data = encoder.encode(verifier);
+  var hashed = sha256(data);
+  
+  // Convert ArrayBuffer to base64url
+  return btoa(String.fromCharCode.apply(null, new Uint8Array(hashed)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
 };
 
 // Message sending functions
 SpotifyAuth.prototype.sendAuthSuccess = function() {
+  console.log('sendAuthSuccess called');
+  console.log('Access token:', this.accessToken);
+  console.log('Refresh token:', this.refreshToken);
+  console.log('Token expires at:', this.tokenExpiresAt);
+  
   Pebble.sendAppMessage({
     1: 1, // AUTH_SUCCESS key
     7: this.accessToken, // ACCESS_TOKEN key
     8: this.refreshToken, // REFRESH_TOKEN key
     9: this.tokenExpiresAt // EXPIRES_AT key
   });
+  
+  console.log('Auth success message sent to C app');
 };
 
 SpotifyAuth.prototype.sendAuthError = function(error) {
@@ -259,14 +296,14 @@ SpotifyAuth.prototype.sendAuthError = function(error) {
 SpotifyAuth.prototype.sendApiResponse = function(data) {
   Pebble.sendAppMessage({
     5: 1, // API_RESPONSE key
-    data: JSON.stringify(data)
+    14: JSON.stringify(data) // RESPONSE_DATA key
   });
 };
 
 SpotifyAuth.prototype.sendApiError = function(error) {
   Pebble.sendAppMessage({
     6: 1, // API_ERROR key
-    error: error
+    13: error // ERROR_MESSAGE key
   });
 };
 

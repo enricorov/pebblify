@@ -26,7 +26,7 @@
     },
     "messageKeys": [
       "AUTH_REQUEST",
-      "AUTH_SUCCESS",
+      "AUTH_SUCCESS", 
       "AUTH_ERROR",
       "TOKEN_REFRESH",
       "API_CALL",
@@ -34,7 +34,12 @@
       "API_ERROR",
       "ACCESS_TOKEN",
       "REFRESH_TOKEN",
-      "EXPIRES_AT"
+      "EXPIRES_AT",
+      "API_PATH",
+      "HTTP_METHOD",
+      "API_DATA",
+      "ERROR_MESSAGE",
+      "RESPONSE_DATA"
     ],
     "resources": {
       "media": [
