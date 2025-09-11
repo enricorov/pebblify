@@ -54,6 +54,7 @@ typedef struct {
   TextLayer *track_layer;
   TextLayer *artist_layer;
   ActionBarLayer *action_bar_layer;
+  AppTimer *refresh_timer;
 } AppData;
 
 static AppData s_app_data;
@@ -246,21 +247,18 @@ static void now_playing_window_load(Window *window) {
   s_app_data.action_bar_layer = action_bar_layer_create();
   action_bar_layer_add_to_window(s_app_data.action_bar_layer, window);
   
-  // Set up ActionBarLayer click handlers
-  action_bar_layer_set_click_config_provider(s_app_data.action_bar_layer, now_playing_click_config_provider);
-  
   // Create text layers for track info (ActionBarLayer takes up right side)
   s_app_data.track_layer = text_layer_create(GRect(10, 20, bounds.size.w - ACTION_BAR_WIDTH - 20, 30));
   text_layer_set_text_alignment(s_app_data.track_layer, GTextAlignmentCenter);
   text_layer_set_font(s_app_data.track_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
-  text_layer_set_text_color(s_app_data.track_layer, GColorWhite);
+  text_layer_set_text_color(s_app_data.track_layer, GColorBlack);
   text_layer_set_background_color(s_app_data.track_layer, GColorClear);
   layer_add_child(window_layer, text_layer_get_layer(s_app_data.track_layer));
   
   s_app_data.artist_layer = text_layer_create(GRect(10, 50, bounds.size.w - ACTION_BAR_WIDTH - 20, 25));
   text_layer_set_text_alignment(s_app_data.artist_layer, GTextAlignmentCenter);
   text_layer_set_font(s_app_data.artist_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
-  text_layer_set_text_color(s_app_data.artist_layer, GColorWhite);
+  text_layer_set_text_color(s_app_data.artist_layer, GColorBlack);
   text_layer_set_background_color(s_app_data.artist_layer, GColorClear);
   layer_add_child(window_layer, text_layer_get_layer(s_app_data.artist_layer));
   
@@ -274,16 +272,31 @@ static void now_playing_window_load(Window *window) {
   s_app_data.can_skip_prev = true;
   s_app_data.can_skip_next = true;
   
+  // Set background color
+  window_set_background_color(window, GColorWhite);
+  
+  // Set up click recognizer
+  window_set_click_config_provider(window, now_playing_click_config_provider);
+  
   // Update display
   now_playing_update_display();
   
   // Refresh current track data
   if (s_app_data.is_authenticated) {
     refresh_now_playing();
+    
+    // Set up periodic refresh every 10 seconds
+    s_app_data.refresh_timer = app_timer_register(10000, (AppTimerCallback)refresh_now_playing, NULL);
   }
 }
 
 static void now_playing_window_unload(Window *window) {
+  // Clean up timer
+  if (s_app_data.refresh_timer) {
+    app_timer_cancel(s_app_data.refresh_timer);
+    s_app_data.refresh_timer = NULL;
+  }
+  
   // Clean up layers
   if (s_app_data.track_layer) {
     text_layer_destroy(s_app_data.track_layer);
@@ -300,9 +313,11 @@ static void now_playing_window_unload(Window *window) {
 }
 
 static void now_playing_click_config_provider(void *context) {
-  // Set up click handlers for the ActionBarLayer buttons
-  action_bar_layer_set_click_config_provider(s_app_data.action_bar_layer, now_playing_click_config_provider);
+  window_single_click_subscribe(BUTTON_ID_UP, now_playing_click_handler);
+  window_single_click_subscribe(BUTTON_ID_SELECT, now_playing_click_handler);
+  window_single_click_subscribe(BUTTON_ID_DOWN, now_playing_click_handler);
 }
+
 
 static void now_playing_click_handler(ClickRecognizerRef recognizer, void *context) {
   ButtonId button = click_recognizer_get_button_id(recognizer);
@@ -311,7 +326,17 @@ static void now_playing_click_handler(ClickRecognizerRef recognizer, void *conte
 
 
 static void now_playing_handle_action(ButtonId button) {
+  // Always allow SELECT button to switch control modes
+  if (button == BUTTON_ID_SELECT && s_app_data.control_mode == CONTROL_MODE_DEFAULT) {
+    now_playing_set_control_mode(CONTROL_MODE_VOLUME);
+    return;
+  }
+  
   if (!s_app_data.is_active_session) {
+    // Show helpful message when no active session
+    strcpy(s_app_data.track_name, "No Active Session");
+    strcpy(s_app_data.artist_name, "Start playing music on Spotify");
+    now_playing_update_display();
     return;
   }
   
@@ -394,38 +419,64 @@ static void now_playing_update_display() {
     return;
   }
   
+  APP_LOG(APP_LOG_LEVEL_INFO, "Updating display - track: '%s', artist: '%s', active: %s", 
+          s_app_data.track_name, s_app_data.artist_name, s_app_data.is_active_session ? "true" : "false");
+  
   // Update text layers
   if (s_app_data.track_layer) {
-    text_layer_set_text(s_app_data.track_layer, s_app_data.track_name);
+    if (!s_app_data.is_active_session) {
+      text_layer_set_text(s_app_data.track_layer, "No Active Session");
+    } else if (s_app_data.control_mode == CONTROL_MODE_VOLUME) {
+      // Show volume percentage in volume mode
+      char volume_text[32];
+      snprintf(volume_text, sizeof(volume_text), "Volume: %d%%", s_app_data.volume_percent);
+      text_layer_set_text(s_app_data.track_layer, volume_text);
+    } else {
+      text_layer_set_text(s_app_data.track_layer, s_app_data.track_name);
+    }
   }
   if (s_app_data.artist_layer) {
-    text_layer_set_text(s_app_data.artist_layer, s_app_data.artist_name);
+    if (!s_app_data.is_active_session) {
+      text_layer_set_text(s_app_data.artist_layer, "Start playing music on Spotify");
+    } else if (s_app_data.control_mode == CONTROL_MODE_VOLUME) {
+      // Show control mode indicator
+      text_layer_set_text(s_app_data.artist_layer, "Volume Control Mode");
+    } else {
+      text_layer_set_text(s_app_data.artist_layer, s_app_data.artist_name);
+    }
   }
   
   // Update ActionBarLayer based on control mode
   if (s_app_data.action_bar_layer) {
-    switch (s_app_data.control_mode) {
-      case CONTROL_MODE_DEFAULT:
-        // Previous, Play/Pause, Next
-        action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_UP, 
-          s_app_data.can_skip_prev ? gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_BACKWARD) : NULL);
-        action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_SELECT, 
-          gbitmap_create_with_resource(s_app_data.is_playing ? 
-            RESOURCE_ID_IMAGE_MUSIC_ICON_PAUSE : RESOURCE_ID_IMAGE_MUSIC_ICON_PLAY));
-        action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_DOWN, 
-          s_app_data.can_skip_next ? gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_FORWARD) : NULL);
-        break;
-        
-      case CONTROL_MODE_VOLUME:
-        // Volume Down, Play/Pause, Volume Up
-        action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_UP, 
-          gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_UP));
-        action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_SELECT, 
-          gbitmap_create_with_resource(s_app_data.is_playing ? 
-            RESOURCE_ID_IMAGE_MUSIC_ICON_PAUSE : RESOURCE_ID_IMAGE_MUSIC_ICON_PLAY));
-        action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_DOWN, 
-          gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_DOWN));
-        break;
+    if (!s_app_data.is_active_session) {
+      // No active session - clear all icons
+      action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_UP, NULL);
+      action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_SELECT, NULL);
+      action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_DOWN, NULL);
+    } else {
+      switch (s_app_data.control_mode) {
+        case CONTROL_MODE_DEFAULT:
+          // Previous, Play/Pause, Next
+          action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_UP, 
+            s_app_data.can_skip_prev ? gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_BACKWARD) : NULL);
+          action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_SELECT, 
+            gbitmap_create_with_resource(s_app_data.is_playing ? 
+              RESOURCE_ID_IMAGE_MUSIC_ICON_PAUSE : RESOURCE_ID_IMAGE_MUSIC_ICON_PLAY));
+          action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_DOWN, 
+            s_app_data.can_skip_next ? gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_FORWARD) : NULL);
+          break;
+          
+        case CONTROL_MODE_VOLUME:
+          // Volume Down, Play/Pause, Volume Up
+          action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_UP, 
+            gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_UP));
+          action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_SELECT, 
+            gbitmap_create_with_resource(s_app_data.is_playing ? 
+              RESOURCE_ID_IMAGE_MUSIC_ICON_PAUSE : RESOURCE_ID_IMAGE_MUSIC_ICON_PLAY));
+          action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_DOWN, 
+            gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_DOWN));
+          break;
+      }
     }
   }
 }
@@ -594,7 +645,7 @@ static void handle_api_error(DictionaryIterator *iter) {
   if (error_tuple) {
     APP_LOG(APP_LOG_LEVEL_ERROR, "API Error: %s", error_tuple->value->cstring);
     
-    // Check if this is a volume control error (403 Forbidden)
+    // Check for specific error types
     if (strstr(error_tuple->value->cstring, "403")) {
       // Volume control failed - show a temporary message
       strcpy(s_app_data.track_name, "Volume control not available");
@@ -602,11 +653,21 @@ static void handle_api_error(DictionaryIterator *iter) {
       
       // Auto-clear the error message after 3 seconds
       app_timer_register(3000, (AppTimerCallback)refresh_now_playing, NULL);
+    } else if (strstr(error_tuple->value->cstring, "401")) {
+      // Authentication error - token may be expired
+      strcpy(s_app_data.track_name, "Authentication expired");
+      strcpy(s_app_data.artist_name, "Please re-authenticate");
+      s_app_data.is_active_session = false;
+    } else if (strstr(error_tuple->value->cstring, "404")) {
+      // No active device or track
+      strcpy(s_app_data.track_name, "No Active Device");
+      strcpy(s_app_data.artist_name, "Start playing music on Spotify");
+      s_app_data.is_active_session = false;
     } else {
       // Other API errors
       s_app_data.is_active_session = false;
-      strcpy(s_app_data.track_name, "Error loading track");
-      strcpy(s_app_data.artist_name, "");
+      strcpy(s_app_data.track_name, "Connection error");
+      strcpy(s_app_data.artist_name, "Check your internet connection");
     }
     
     if (s_app_data.now_playing_window) {
@@ -669,6 +730,11 @@ static void make_spotify_api_call(const char *path, const char *method, const ch
 static void refresh_now_playing(void) {
   APP_LOG(APP_LOG_LEVEL_INFO, "refresh_now_playing called");
   make_spotify_api_call("/me/player", "GET", NULL);
+  
+  // Restart the periodic refresh timer if now playing window is active
+  if (s_app_data.now_playing_window && s_app_data.is_authenticated) {
+    s_app_data.refresh_timer = app_timer_register(10000, (AppTimerCallback)refresh_now_playing, NULL);
+  }
 }
 
 static void play_pause_track(void) {
