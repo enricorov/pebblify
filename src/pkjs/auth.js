@@ -1,6 +1,7 @@
 // Spotify Authentication for Pebblify C App
 // Use native Pebble API instead of PebbleJS to avoid module loading issues
 var axios = require('axios');
+var Settings = require('pebblejs/settings')
 
 // Spotify API constants
 var CLIENT_ID = '152d31f9089d4be0b6605671dae99c3f';
@@ -62,12 +63,12 @@ SpotifyAuth.prototype.setupAppMessageHandlers = function() {
 SpotifyAuth.prototype.initSettingsPage = function() {
   console.log('initSettingsPage called');
   var self = this;
-  var authUrl = this.getAuthorizationUrl();
-  console.log('Authorization URL:', authUrl);
+  this.authUrl = this.getAuthorizationUrl();
+  console.log('Authorization URL:', this.authUrl);
   
   // Use native Pebble Settings API
-  Pebble.Settings.config({
-    url: authUrl,
+  Settings.config({
+    url: this.authUrl,
     autosave: false,
     hash: true,
   }, function(e) {
@@ -143,8 +144,17 @@ SpotifyAuth.prototype.handleAuthRequest = function() {
   }
 
   console.log('Opening settings for authentication');
-  // Open settings page for authentication using native Pebble API
-  Pebble.Settings.open();
+  // Use PebbleJS Settings to open configuration page
+  if (typeof Settings.settingsUrl === 'function') {
+    console.log('Using Settings.settingsUrl()');
+    Settings.settingsUrl();
+  } else if (typeof Settings.onOpenConfig === 'function') {
+    console.log('Using Settings.onOpenConfig()');
+    Settings.onOpenConfig();
+  } else {
+    console.log('No suitable Settings method found');
+    console.log('Authorization URL:', this.authUrl);
+  }
 };
 
 SpotifyAuth.prototype.refreshAccessToken = function() {
