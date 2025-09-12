@@ -21,10 +21,6 @@ typedef enum {
 } AuthState;
 
 // Now playing control modes
-typedef enum {
-  CONTROL_MODE_DEFAULT,
-  CONTROL_MODE_VOLUME
-} ControlMode;
 
 typedef struct {
   AppState current_state;
@@ -42,7 +38,6 @@ typedef struct {
   
   // Now playing data
   bool is_active_session;
-  ControlMode control_mode;
   char track_name[128];
   char artist_name[128];
   bool is_playing;
@@ -96,9 +91,9 @@ static int calculate_text_height(const char *text, GFont font, int width);
 static void now_playing_window_load(Window *window);
 static void now_playing_window_unload(Window *window);
 static void now_playing_click_handler(ClickRecognizerRef recognizer, void *context);
+static void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *context);
 static void now_playing_click_config_provider(void *context);
 static void now_playing_update_display(void);
-static void now_playing_set_control_mode(ControlMode mode);
 static void now_playing_handle_action(ButtonId button);
 
 int main(void) {
@@ -287,8 +282,15 @@ static void now_playing_window_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
   
-  // Create ActionBarLayer
+  // Create ActionBarLayer with animation
   s_app_data.action_bar_layer = action_bar_layer_create();
+  action_bar_layer_set_click_config_provider(s_app_data.action_bar_layer, now_playing_click_config_provider);
+  
+  // Set press animations for better user feedback
+  action_bar_layer_set_icon_press_animation(s_app_data.action_bar_layer, BUTTON_ID_UP, ActionBarLayerIconPressAnimationMoveLeft);
+  action_bar_layer_set_icon_press_animation(s_app_data.action_bar_layer, BUTTON_ID_SELECT, ActionBarLayerIconPressAnimationMoveUp);
+  action_bar_layer_set_icon_press_animation(s_app_data.action_bar_layer, BUTTON_ID_DOWN, ActionBarLayerIconPressAnimationMoveRight);
+  
   action_bar_layer_add_to_window(s_app_data.action_bar_layer, window);
   
   // Create text layers for track info (ActionBarLayer takes up right side)
@@ -322,7 +324,6 @@ static void now_playing_window_load(Window *window) {
   
   // Initialize now playing data
   s_app_data.is_active_session = false;
-  s_app_data.control_mode = CONTROL_MODE_DEFAULT;
   strcpy(s_app_data.track_name, "No active session");
   strcpy(s_app_data.artist_name, "");
   s_app_data.is_playing = false;
@@ -333,8 +334,7 @@ static void now_playing_window_load(Window *window) {
   // Set background color
   window_set_background_color(window, GColorWhite);
   
-  // Set up click recognizer
-  window_set_click_config_provider(window, now_playing_click_config_provider);
+  // Click config is handled by ActionBarLayer
   
   // Update display
   now_playing_update_display();
@@ -370,26 +370,53 @@ static void now_playing_window_unload(Window *window) {
   }
 }
 
+static void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *context) {
+  ButtonId button = click_recognizer_get_button_id(recognizer);
+  
+  // Long press actions for track navigation
+  if (!s_app_data.is_active_session) {
+    return; // No action for long press when no active session
+  }
+  
+  switch (button) {
+    case BUTTON_ID_UP:
+      // Previous track (long press)
+      if (s_app_data.can_skip_prev) {
+        skip_to_previous();
+      }
+      break;
+    case BUTTON_ID_DOWN:
+      // Next track (long press)
+      if (s_app_data.can_skip_next) {
+        skip_to_next();
+      }
+      break;
+    default:
+      break;
+  }
+}
+
 static void now_playing_click_config_provider(void *context) {
+  // Single clicks for volume and play/pause
   window_single_click_subscribe(BUTTON_ID_UP, now_playing_click_handler);
   window_single_click_subscribe(BUTTON_ID_SELECT, now_playing_click_handler);
   window_single_click_subscribe(BUTTON_ID_DOWN, now_playing_click_handler);
+  
+  // Long clicks for track navigation
+  window_long_click_subscribe(BUTTON_ID_UP, 200, now_playing_long_click_handler, NULL);
+  window_long_click_subscribe(BUTTON_ID_DOWN, 200, now_playing_long_click_handler, NULL);
 }
 
 
 static void now_playing_click_handler(ClickRecognizerRef recognizer, void *context) {
   ButtonId button = click_recognizer_get_button_id(recognizer);
+  
+  // Single click actions for volume and play/pause
   now_playing_handle_action(button);
 }
 
 
 static void now_playing_handle_action(ButtonId button) {
-  // Always allow SELECT button to switch control modes
-  if (button == BUTTON_ID_SELECT && s_app_data.control_mode == CONTROL_MODE_DEFAULT) {
-    now_playing_set_control_mode(CONTROL_MODE_VOLUME);
-    return;
-  }
-  
   if (!s_app_data.is_active_session) {
     // Show helpful message when no active session
     strcpy(s_app_data.track_name, "No Active Session");
@@ -398,79 +425,50 @@ static void now_playing_handle_action(ButtonId button) {
     return;
   }
   
-  switch (s_app_data.control_mode) {
-    case CONTROL_MODE_DEFAULT:
-      switch (button) {
-        case BUTTON_ID_UP:
-          // Previous track
-          if (s_app_data.can_skip_prev) {
-            skip_to_previous();
-          }
-          break;
-        case BUTTON_ID_SELECT:
-          // Switch to volume mode
-          now_playing_set_control_mode(CONTROL_MODE_VOLUME);
-          break;
-        case BUTTON_ID_DOWN:
-          // Next track
-          if (s_app_data.can_skip_next) {
-            skip_to_next();
-          }
-          break;
-        default:
-          break;
+  // New simplified button behavior:
+  // UP - Volume Up
+  // SELECT - Play/Pause  
+  // DOWN - Volume Down
+  switch (button) {
+    case BUTTON_ID_UP:
+      // Volume up
+      if (s_app_data.volume_percent < 100) {
+        s_app_data.volume_percent = (s_app_data.volume_percent + 10 > 100) ? 100 : s_app_data.volume_percent + 10;
+        APP_LOG(APP_LOG_LEVEL_INFO, "Volume up pressed, new volume: %d%%", s_app_data.volume_percent);
+        set_volume(s_app_data.volume_percent);
+        // Update display immediately to show new volume
+        now_playing_update_display();
+        // Refresh now playing data after volume change
+        app_timer_register(500, (AppTimerCallback)refresh_now_playing, NULL);
+      } else {
+        APP_LOG(APP_LOG_LEVEL_INFO, "Volume already at maximum");
       }
       break;
-      
-    case CONTROL_MODE_VOLUME:
-      switch (button) {
-        case BUTTON_ID_UP:
-          // Volume up
-          if (s_app_data.volume_percent < 100) {
-            s_app_data.volume_percent = (s_app_data.volume_percent + 2 > 100) ? 100 : s_app_data.volume_percent + 2;
-            APP_LOG(APP_LOG_LEVEL_INFO, "Volume up pressed, new volume: %d%%", s_app_data.volume_percent);
-            set_volume(s_app_data.volume_percent);
-            // Update display immediately to show new volume
-            now_playing_update_display();
-            // Refresh now playing data after volume change
-            app_timer_register(500, (AppTimerCallback)refresh_now_playing, NULL);
-          } else {
-            APP_LOG(APP_LOG_LEVEL_INFO, "Volume already at maximum");
-          }
-          break;
-        case BUTTON_ID_SELECT:
-          // Play/pause
-          play_pause_track();
-          break;
-        case BUTTON_ID_DOWN:
-          // Volume down
-          if (s_app_data.volume_percent > 0) {
-            s_app_data.volume_percent = (s_app_data.volume_percent - 2 < 0) ? 0 : s_app_data.volume_percent - 2;
-            APP_LOG(APP_LOG_LEVEL_INFO, "Volume down pressed, new volume: %d%%", s_app_data.volume_percent);
-            set_volume(s_app_data.volume_percent);
-            // Update display immediately to show new volume
-            now_playing_update_display();
-            // Refresh now playing data after volume change
-            app_timer_register(500, (AppTimerCallback)refresh_now_playing, NULL);
-          } else {
-            APP_LOG(APP_LOG_LEVEL_INFO, "Volume already at minimum");
-          }
-          break;
-        default:
-          break;
+    case BUTTON_ID_SELECT:
+      // Play/pause
+      play_pause_track();
+      break;
+    case BUTTON_ID_DOWN:
+      // Volume down
+      if (s_app_data.volume_percent > 0) {
+        s_app_data.volume_percent = (s_app_data.volume_percent - 10 < 0) ? 0 : s_app_data.volume_percent - 10;
+        APP_LOG(APP_LOG_LEVEL_INFO, "Volume down pressed, new volume: %d%%", s_app_data.volume_percent);
+        set_volume(s_app_data.volume_percent);
+        // Update display immediately to show new volume
+        now_playing_update_display();
+        // Refresh now playing data after volume change
+        app_timer_register(500, (AppTimerCallback)refresh_now_playing, NULL);
+      } else {
+        APP_LOG(APP_LOG_LEVEL_INFO, "Volume already at minimum");
       }
-      // Auto-return to default mode after 2 seconds
-      app_timer_register(2000, (AppTimerCallback)now_playing_set_control_mode, (void*)CONTROL_MODE_DEFAULT);
+      break;
+    default:
       break;
   }
   
   now_playing_update_display();
 }
 
-static void now_playing_set_control_mode(ControlMode mode) {
-  s_app_data.control_mode = mode;
-  now_playing_update_display();
-}
 
 static void now_playing_update_display() {
   if (!s_app_data.now_playing_window) {
@@ -487,11 +485,6 @@ static void now_playing_update_display() {
   if (!s_app_data.is_active_session) {
     track_text = "No Active Session";
     artist_text = "Start playing music on Spotify";
-  } else if (s_app_data.control_mode == CONTROL_MODE_VOLUME) {
-    static char volume_text[32];
-    snprintf(volume_text, sizeof(volume_text), "Volume: %d%%", s_app_data.volume_percent);
-    track_text = volume_text;
-    artist_text = "Volume Control Mode";
   } else {
     track_text = s_app_data.track_name;
     artist_text = s_app_data.artist_name;
@@ -545,7 +538,7 @@ static void now_playing_update_display() {
     text_layer_set_text(s_app_data.artist_layer, artist_text);
   }
   
-  // Update ActionBarLayer based on control mode
+  // Update ActionBarLayer with new simplified button behavior
   if (s_app_data.action_bar_layer) {
     if (!s_app_data.is_active_session) {
       // No active session - clear all icons
@@ -553,29 +546,14 @@ static void now_playing_update_display() {
       action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_SELECT, NULL);
       action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_DOWN, NULL);
     } else {
-      switch (s_app_data.control_mode) {
-        case CONTROL_MODE_DEFAULT:
-          // Previous, Play/Pause, Next
-          action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_UP, 
-            s_app_data.can_skip_prev ? gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_BACKWARD) : NULL);
-          action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_SELECT, 
-            gbitmap_create_with_resource(s_app_data.is_playing ? 
-              RESOURCE_ID_IMAGE_MUSIC_ICON_PAUSE : RESOURCE_ID_IMAGE_MUSIC_ICON_PLAY));
-          action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_DOWN, 
-            s_app_data.can_skip_next ? gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_FORWARD) : NULL);
-          break;
-          
-        case CONTROL_MODE_VOLUME:
-          // Volume Down, Play/Pause, Volume Up
-          action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_UP, 
-            gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_UP));
-          action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_SELECT, 
-            gbitmap_create_with_resource(s_app_data.is_playing ? 
-              RESOURCE_ID_IMAGE_MUSIC_ICON_PAUSE : RESOURCE_ID_IMAGE_MUSIC_ICON_PLAY));
-          action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_DOWN, 
-            gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_DOWN));
-          break;
-      }
+      // New simplified behavior: Volume Up, Play/Pause, Volume Down (with animation)
+      action_bar_layer_set_icon_animated(s_app_data.action_bar_layer, BUTTON_ID_UP, 
+        gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_UP), true);
+      action_bar_layer_set_icon_animated(s_app_data.action_bar_layer, BUTTON_ID_SELECT, 
+        gbitmap_create_with_resource(s_app_data.is_playing ? 
+          RESOURCE_ID_IMAGE_MUSIC_ICON_PAUSE : RESOURCE_ID_IMAGE_MUSIC_ICON_PLAY), true);
+      action_bar_layer_set_icon_animated(s_app_data.action_bar_layer, BUTTON_ID_DOWN, 
+        gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_DOWN), true);
     }
   }
 }
