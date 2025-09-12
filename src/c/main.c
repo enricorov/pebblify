@@ -48,8 +48,10 @@ typedef struct {
   // Now playing UI elements
   TextLayer *track_layer;
   TextLayer *artist_layer;
+  TextLayer *clock_layer;
   ActionBarLayer *action_bar_layer;
   AppTimer *refresh_timer;
+  AppTimer *clock_timer;
 } AppData;
 
 static AppData s_app_data;
@@ -95,6 +97,7 @@ static void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *
 static void now_playing_click_config_provider(void *context);
 static void now_playing_update_display(void);
 static void now_playing_handle_action(ButtonId button);
+static void update_clock(void);
 
 int main(void) {
   init_app();
@@ -215,6 +218,10 @@ static void main_window_load(Window *window) {
   });
   
   menu_layer_set_click_config_onto_window(s_app_data.main_menu, window);
+  
+  // Enable clock in menu layer
+  menu_layer_set_highlight_colors(s_app_data.main_menu, GColorBlack, GColorWhite);
+  
   layer_add_child(window_layer, menu_layer_get_layer(s_app_data.main_menu));
 }
 
@@ -286,10 +293,20 @@ static void now_playing_window_load(Window *window) {
   s_app_data.action_bar_layer = action_bar_layer_create();
   action_bar_layer_set_click_config_provider(s_app_data.action_bar_layer, now_playing_click_config_provider);
   
+  // Create clock text layer at the bottom
+  s_app_data.clock_layer = text_layer_create(GRect(10, bounds.size.h - 30, bounds.size.w - ACTION_BAR_WIDTH - 20, 25));
+  text_layer_set_text_alignment(s_app_data.clock_layer, GTextAlignmentCenter);
+  text_layer_set_font(s_app_data.clock_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
+  text_layer_set_text_color(s_app_data.clock_layer, GColorBlack);
+  text_layer_set_background_color(s_app_data.clock_layer, GColorClear);
+  layer_add_child(window_layer, text_layer_get_layer(s_app_data.clock_layer));
+  
   // Set press animations for better user feedback
   action_bar_layer_set_icon_press_animation(s_app_data.action_bar_layer, BUTTON_ID_UP, ActionBarLayerIconPressAnimationMoveLeft);
-  action_bar_layer_set_icon_press_animation(s_app_data.action_bar_layer, BUTTON_ID_SELECT, ActionBarLayerIconPressAnimationMoveUp);
-  action_bar_layer_set_icon_press_animation(s_app_data.action_bar_layer, BUTTON_ID_DOWN, ActionBarLayerIconPressAnimationMoveRight);
+  action_bar_layer_set_icon_press_animation(s_app_data.action_bar_layer, BUTTON_ID_SELECT, ActionBarLayerIconPressAnimationMoveLeft);
+  action_bar_layer_set_icon_press_animation(s_app_data.action_bar_layer, BUTTON_ID_DOWN, ActionBarLayerIconPressAnimationMoveLeft);
+  
+  // Long press icons will be set dynamically in the long press handler
   
   action_bar_layer_add_to_window(s_app_data.action_bar_layer, window);
   
@@ -339,6 +356,10 @@ static void now_playing_window_load(Window *window) {
   // Update display
   now_playing_update_display();
   
+  // Start clock timer (update every minute)
+  update_clock();
+  s_app_data.clock_timer = app_timer_register(60000, (AppTimerCallback)update_clock, NULL);
+  
   // Refresh current track data
   if (s_app_data.is_authenticated) {
     refresh_now_playing();
@@ -364,9 +385,17 @@ static void now_playing_window_unload(Window *window) {
     text_layer_destroy(s_app_data.artist_layer);
     s_app_data.artist_layer = NULL;
   }
+  if (s_app_data.clock_layer) {
+    text_layer_destroy(s_app_data.clock_layer);
+    s_app_data.clock_layer = NULL;
+  }
   if (s_app_data.action_bar_layer) {
     action_bar_layer_destroy(s_app_data.action_bar_layer);
     s_app_data.action_bar_layer = NULL;
+  }
+  if (s_app_data.clock_timer) {
+    app_timer_cancel(s_app_data.clock_timer);
+    s_app_data.clock_timer = NULL;
   }
 }
 
@@ -378,6 +407,25 @@ static void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *
     return; // No action for long press when no active session
   }
   
+  // Change icons to show track navigation mode
+  if (s_app_data.action_bar_layer) {
+    switch (button) {
+      case BUTTON_ID_UP:
+        // Show previous track icon
+        action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_UP, 
+          gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_BACKWARD));
+        break;
+      case BUTTON_ID_DOWN:
+        // Show next track icon
+        action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_DOWN, 
+          gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_FORWARD));
+        break;
+      default:
+        break;
+    }
+  }
+  
+  // Perform the track navigation action
   switch (button) {
     case BUTTON_ID_UP:
       // Previous track (long press)
@@ -394,6 +442,9 @@ static void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *
     default:
       break;
   }
+  
+  // Restore original icons after a brief delay to show the change
+  app_timer_register(300, (AppTimerCallback)now_playing_update_display, NULL);
 }
 
 static void now_playing_click_config_provider(void *context) {
@@ -497,16 +548,21 @@ static void now_playing_update_display() {
   // Calculate dynamic heights for the new text content
   GFont track_font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
   GFont artist_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-  
+
   int track_height = calculate_text_height(track_text, track_font, bounds.size.w - ACTION_BAR_WIDTH - 20);
   int artist_height = calculate_text_height(artist_text, artist_font, bounds.size.w - ACTION_BAR_WIDTH - 20);
-  
+
   // Ensure minimum heights
   if (track_height < 30) track_height = 30;
   if (artist_height < 25) artist_height = 25;
+
+  // Allow artist to move further down if track name is very long
+  int max_track_height = bounds.size.h - 80; // Reserve space for artist + clock + margins
+  if (track_height > max_track_height) {
+    track_height = max_track_height;
+  }
   
   // Dynamic height limits based on screen size
-  int max_track_height = bounds.size.h - 60; // Reserve space for artist + action bar + margins
   int max_artist_height = bounds.size.h - track_height - 20; // Reserve space for margins
   
   if (track_height > max_track_height) {
@@ -532,7 +588,7 @@ static void now_playing_update_display() {
     layer_set_frame(text_layer_get_layer(s_app_data.track_layer), GRect(10, 5, bounds.size.w - ACTION_BAR_WIDTH - 20, track_height));
     text_layer_set_text(s_app_data.track_layer, track_text);
   }
-  
+
   if (s_app_data.artist_layer) {
     layer_set_frame(text_layer_get_layer(s_app_data.artist_layer), GRect(10, 10 + track_height, bounds.size.w - ACTION_BAR_WIDTH - 20, artist_height));
     text_layer_set_text(s_app_data.artist_layer, artist_text);
@@ -546,14 +602,14 @@ static void now_playing_update_display() {
       action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_SELECT, NULL);
       action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_DOWN, NULL);
     } else {
-      // New simplified behavior: Volume Up, Play/Pause, Volume Down (with animation)
-      action_bar_layer_set_icon_animated(s_app_data.action_bar_layer, BUTTON_ID_UP, 
-        gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_UP), true);
-      action_bar_layer_set_icon_animated(s_app_data.action_bar_layer, BUTTON_ID_SELECT, 
+      // New simplified behavior: Volume Up, Play/Pause, Volume Down (no animation on set)
+      action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_UP, 
+        gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_UP));
+      action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_SELECT, 
         gbitmap_create_with_resource(s_app_data.is_playing ? 
-          RESOURCE_ID_IMAGE_MUSIC_ICON_PAUSE : RESOURCE_ID_IMAGE_MUSIC_ICON_PLAY), true);
-      action_bar_layer_set_icon_animated(s_app_data.action_bar_layer, BUTTON_ID_DOWN, 
-        gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_DOWN), true);
+          RESOURCE_ID_IMAGE_MUSIC_ICON_PAUSE : RESOURCE_ID_IMAGE_MUSIC_ICON_PLAY));
+      action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_DOWN, 
+        gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_DOWN));
     }
   }
 }
@@ -855,11 +911,28 @@ static int calculate_text_height(const char *text, GFont font, int width) {
   if (!text || strlen(text) == 0) {
     return 20; // Default height for empty text
   }
-  
+
   // Use graphics_text_layout_get_content_size to calculate the height needed
   GRect bounds = GRect(0, 0, width, 200); // Large height to measure
   GSize text_size = graphics_text_layout_get_content_size(text, font, bounds, GTextOverflowModeWordWrap, GTextAlignmentCenter);
-  
+
   return text_size.h + 5; // Add small padding
+}
+
+static void update_clock(void) {
+  if (!s_app_data.clock_layer) {
+    return;
+  }
+
+  time_t now = time(NULL);
+  struct tm *tick_time = localtime(&now);
+  
+  static char clock_text[16];
+  strftime(clock_text, sizeof(clock_text), "%H:%M", tick_time);
+  
+  text_layer_set_text(s_app_data.clock_layer, clock_text);
+  
+  // Restart timer for next update (every minute)
+  s_app_data.clock_timer = app_timer_register(60000, (AppTimerCallback)update_clock, NULL);
 }
 
