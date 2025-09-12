@@ -90,6 +90,7 @@ static void play_pause_track(void);
 static void skip_to_next(void);
 static void skip_to_previous(void);
 static void set_volume(int volume_percent);
+static int calculate_text_height(const char *text, GFont font, int width);
 
 // Now playing window functions
 static void now_playing_window_load(Window *window);
@@ -291,18 +292,32 @@ static void now_playing_window_load(Window *window) {
   action_bar_layer_add_to_window(s_app_data.action_bar_layer, window);
   
   // Create text layers for track info (ActionBarLayer takes up right side)
-  s_app_data.track_layer = text_layer_create(GRect(10, 20, bounds.size.w - ACTION_BAR_WIDTH - 20, 30));
+  // Create text layers with dynamic height calculation
+  GFont track_font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+  GFont artist_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  
+  // Calculate dynamic heights based on text content
+  int track_height = calculate_text_height(s_app_data.track_name, track_font, bounds.size.w - ACTION_BAR_WIDTH - 20);
+  int artist_height = calculate_text_height(s_app_data.artist_name, artist_font, bounds.size.w - ACTION_BAR_WIDTH - 20);
+  
+  // Ensure minimum heights
+  if (track_height < 30) track_height = 30;
+  if (artist_height < 25) artist_height = 25;
+  
+  s_app_data.track_layer = text_layer_create(GRect(10, 5, bounds.size.w - ACTION_BAR_WIDTH - 20, track_height));
   text_layer_set_text_alignment(s_app_data.track_layer, GTextAlignmentCenter);
-  text_layer_set_font(s_app_data.track_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
+  text_layer_set_font(s_app_data.track_layer, track_font);
   text_layer_set_text_color(s_app_data.track_layer, GColorBlack);
   text_layer_set_background_color(s_app_data.track_layer, GColorClear);
+  text_layer_set_overflow_mode(s_app_data.track_layer, GTextOverflowModeWordWrap);
   layer_add_child(window_layer, text_layer_get_layer(s_app_data.track_layer));
   
-  s_app_data.artist_layer = text_layer_create(GRect(10, 50, bounds.size.w - ACTION_BAR_WIDTH - 20, 25));
+  s_app_data.artist_layer = text_layer_create(GRect(10, 10 + track_height, bounds.size.w - ACTION_BAR_WIDTH - 20, artist_height));
   text_layer_set_text_alignment(s_app_data.artist_layer, GTextAlignmentCenter);
-  text_layer_set_font(s_app_data.artist_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
+  text_layer_set_font(s_app_data.artist_layer, artist_font);
   text_layer_set_text_color(s_app_data.artist_layer, GColorBlack);
   text_layer_set_background_color(s_app_data.artist_layer, GColorClear);
+  text_layer_set_overflow_mode(s_app_data.artist_layer, GTextOverflowModeWordWrap);
   layer_add_child(window_layer, text_layer_get_layer(s_app_data.artist_layer));
   
   // Initialize now playing data
@@ -465,28 +480,69 @@ static void now_playing_update_display() {
   APP_LOG(APP_LOG_LEVEL_INFO, "Updating display - track: '%s', artist: '%s', active: %s", 
           s_app_data.track_name, s_app_data.artist_name, s_app_data.is_active_session ? "true" : "false");
   
-  // Update text layers
-  if (s_app_data.track_layer) {
-    if (!s_app_data.is_active_session) {
-      text_layer_set_text(s_app_data.track_layer, "No Active Session");
-    } else if (s_app_data.control_mode == CONTROL_MODE_VOLUME) {
-      // Show volume percentage in volume mode
-      char volume_text[32];
-      snprintf(volume_text, sizeof(volume_text), "Volume: %d%%", s_app_data.volume_percent);
-      text_layer_set_text(s_app_data.track_layer, volume_text);
-    } else {
-      text_layer_set_text(s_app_data.track_layer, s_app_data.track_name);
-    }
+  // Determine the text content for each layer
+  const char *track_text;
+  const char *artist_text;
+  
+  if (!s_app_data.is_active_session) {
+    track_text = "No Active Session";
+    artist_text = "Start playing music on Spotify";
+  } else if (s_app_data.control_mode == CONTROL_MODE_VOLUME) {
+    static char volume_text[32];
+    snprintf(volume_text, sizeof(volume_text), "Volume: %d%%", s_app_data.volume_percent);
+    track_text = volume_text;
+    artist_text = "Volume Control Mode";
+  } else {
+    track_text = s_app_data.track_name;
+    artist_text = s_app_data.artist_name;
   }
+  
+  // Get window bounds for width calculation
+  Layer *window_layer = window_get_root_layer(s_app_data.now_playing_window);
+  GRect bounds = layer_get_bounds(window_layer);
+  
+  // Calculate dynamic heights for the new text content
+  GFont track_font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+  GFont artist_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  
+  int track_height = calculate_text_height(track_text, track_font, bounds.size.w - ACTION_BAR_WIDTH - 20);
+  int artist_height = calculate_text_height(artist_text, artist_font, bounds.size.w - ACTION_BAR_WIDTH - 20);
+  
+  // Ensure minimum heights
+  if (track_height < 30) track_height = 30;
+  if (artist_height < 25) artist_height = 25;
+  
+  // Dynamic height limits based on screen size
+  int max_track_height = bounds.size.h - 60; // Reserve space for artist + action bar + margins
+  int max_artist_height = bounds.size.h - track_height - 20; // Reserve space for margins
+  
+  if (track_height > max_track_height) {
+    track_height = max_track_height;
+    // Switch to ellipsis mode for track text
+    text_layer_set_overflow_mode(s_app_data.track_layer, GTextOverflowModeFill);
+  } else {
+    // Keep word wrap mode for track text
+    text_layer_set_overflow_mode(s_app_data.track_layer, GTextOverflowModeWordWrap);
+  }
+  
+  if (artist_height > max_artist_height) {
+    artist_height = max_artist_height;
+    // Switch to ellipsis mode for artist text
+    text_layer_set_overflow_mode(s_app_data.artist_layer, GTextOverflowModeFill);
+  } else {
+    // Keep word wrap mode for artist text
+    text_layer_set_overflow_mode(s_app_data.artist_layer, GTextOverflowModeWordWrap);
+  }
+  
+  // Resize and reposition text layers
+  if (s_app_data.track_layer) {
+    layer_set_frame(text_layer_get_layer(s_app_data.track_layer), GRect(10, 5, bounds.size.w - ACTION_BAR_WIDTH - 20, track_height));
+    text_layer_set_text(s_app_data.track_layer, track_text);
+  }
+  
   if (s_app_data.artist_layer) {
-    if (!s_app_data.is_active_session) {
-      text_layer_set_text(s_app_data.artist_layer, "Start playing music on Spotify");
-    } else if (s_app_data.control_mode == CONTROL_MODE_VOLUME) {
-      // Show control mode indicator
-      text_layer_set_text(s_app_data.artist_layer, "Volume Control Mode");
-    } else {
-      text_layer_set_text(s_app_data.artist_layer, s_app_data.artist_name);
-    }
+    layer_set_frame(text_layer_get_layer(s_app_data.artist_layer), GRect(10, 10 + track_height, bounds.size.w - ACTION_BAR_WIDTH - 20, artist_height));
+    text_layer_set_text(s_app_data.artist_layer, artist_text);
   }
   
   // Update ActionBarLayer based on control mode
@@ -815,5 +871,17 @@ static void set_volume(int volume_percent) {
   snprintf(path, sizeof(path), "/me/player/volume?volume_percent=%d", volume_percent);
   APP_LOG(APP_LOG_LEVEL_INFO, "Setting volume to %d%%", volume_percent);
   make_spotify_api_call(path, "PUT", NULL);
+}
+
+static int calculate_text_height(const char *text, GFont font, int width) {
+  if (!text || strlen(text) == 0) {
+    return 20; // Default height for empty text
+  }
+  
+  // Use graphics_text_layout_get_content_size to calculate the height needed
+  GRect bounds = GRect(0, 0, width, 200); // Large height to measure
+  GSize text_size = graphics_text_layout_get_content_size(text, font, bounds, GTextOverflowModeWordWrap, GTextAlignmentCenter);
+  
+  return text_size.h + 5; // Add small padding
 }
 
