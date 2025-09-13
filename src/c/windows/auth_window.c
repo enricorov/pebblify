@@ -92,7 +92,7 @@ void auth_request_authentication(void) {
 }
 
 void auth_handle_success(DictionaryIterator *iter) {
-  // APP_LOG(APP_LOG_LEVEL_INFO, "Authentication successful, switching to main menu");
+  APP_LOG(APP_LOG_LEVEL_INFO, "Authentication successful, switching to main menu");
   s_app_data.auth_state = AUTH_STATE_AUTHENTICATED;
   s_app_data.is_authenticated = true;
   
@@ -101,20 +101,64 @@ void auth_handle_success(DictionaryIterator *iter) {
   Tuple *refresh_token_tuple = dict_find(iter, 8); // REFRESH_TOKEN
   Tuple *expires_at_tuple = dict_find(iter, 9);   // EXPIRES_AT
   
+  bool tokens_changed = false;
+  
   if (access_token_tuple) {
-    strncpy(s_app_data.access_token, access_token_tuple->value->cstring, sizeof(s_app_data.access_token) - 1);
-    s_app_data.access_token[sizeof(s_app_data.access_token) - 1] = '\0';
-  }
-  if (refresh_token_tuple) {
-    strncpy(s_app_data.refresh_token, refresh_token_tuple->value->cstring, sizeof(s_app_data.refresh_token) - 1);
-    s_app_data.refresh_token[sizeof(s_app_data.refresh_token) - 1] = '\0';
-  }
-  if (expires_at_tuple) {
-    s_app_data.token_expires_at = expires_at_tuple->value->uint32;
+    char new_access_token[256];
+    strncpy(new_access_token, access_token_tuple->value->cstring, sizeof(new_access_token) - 1);
+    new_access_token[sizeof(new_access_token) - 1] = '\0';
+    
+    // Compare with existing token
+    if (strcmp(s_app_data.access_token, new_access_token) != 0) {
+      strncpy(s_app_data.access_token, new_access_token, sizeof(s_app_data.access_token) - 1);
+      s_app_data.access_token[sizeof(s_app_data.access_token) - 1] = '\0';
+      tokens_changed = true;
+      APP_LOG(APP_LOG_LEVEL_INFO, "Access token changed, length: %d", (int)strlen(s_app_data.access_token));
+    } else {
+      APP_LOG(APP_LOG_LEVEL_INFO, "Access token unchanged, length: %d", (int)strlen(s_app_data.access_token));
+    }
+  } else {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "No access token received");
   }
   
-  // Save authentication data to persistent storage
-  app_state_save_auth_data();
+  if (refresh_token_tuple) {
+    char new_refresh_token[256];
+    strncpy(new_refresh_token, refresh_token_tuple->value->cstring, sizeof(new_refresh_token) - 1);
+    new_refresh_token[sizeof(new_refresh_token) - 1] = '\0';
+    
+    // Compare with existing token
+    if (strcmp(s_app_data.refresh_token, new_refresh_token) != 0) {
+      strncpy(s_app_data.refresh_token, new_refresh_token, sizeof(s_app_data.refresh_token) - 1);
+      s_app_data.refresh_token[sizeof(s_app_data.refresh_token) - 1] = '\0';
+      tokens_changed = true;
+      APP_LOG(APP_LOG_LEVEL_INFO, "Refresh token changed, length: %d", (int)strlen(s_app_data.refresh_token));
+    } else {
+      APP_LOG(APP_LOG_LEVEL_INFO, "Refresh token unchanged, length: %d", (int)strlen(s_app_data.refresh_token));
+    }
+  } else {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "No refresh token received");
+  }
+  
+  if (expires_at_tuple) {
+    uint32_t new_expires_at = expires_at_tuple->value->uint32;
+    if ((uint32_t)s_app_data.token_expires_at != new_expires_at) {
+      s_app_data.token_expires_at = (time_t)new_expires_at;
+      tokens_changed = true;
+      APP_LOG(APP_LOG_LEVEL_INFO, "Token expiration changed to: %lu", (unsigned long)s_app_data.token_expires_at);
+    } else {
+      APP_LOG(APP_LOG_LEVEL_INFO, "Token expiration unchanged: %lu", (unsigned long)s_app_data.token_expires_at);
+    }
+  } else {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "No expiration time received");
+  }
+  
+  // Only save to persistent storage if tokens actually changed
+  if (tokens_changed) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "Tokens changed, saving to persistent storage");
+    app_state_save_auth_data();
+  } else {
+    APP_LOG(APP_LOG_LEVEL_INFO, "Tokens unchanged, skipping persistent storage update");
+  }
   
   // Pop the auth window (main menu is already underneath)
   auth_window_destroy();

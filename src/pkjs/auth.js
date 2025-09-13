@@ -37,6 +37,7 @@ function SpotifyAuth() {
   this.tokenExpiresAt = null;
   this.setupAppMessageHandlers();
   this.initSettingsPage();
+  this.loadStoredTokens(); // Load tokens from localStorage on startup
   // console.log('SpotifyAuth constructor completed');
 }
 
@@ -149,6 +150,9 @@ SpotifyAuth.prototype.getToken = function(pkceCode) {
 
 SpotifyAuth.prototype.handleAuthRequest = function() {
   console.log('handleAuthRequest called');
+  
+  // First, try to load tokens from localStorage
+  this.loadStoredTokens();
   
   // Check if we already have valid tokens
   if (this.accessToken && this.tokenExpiresAt && Date.now() < this.tokenExpiresAt) {
@@ -271,10 +275,10 @@ SpotifyAuth.prototype.pkceChallengeFromVerifier = function(verifier) {
 
 // Message sending functions
 SpotifyAuth.prototype.sendAuthSuccess = function() {
-  // console.log('sendAuthSuccess called');
-  // console.log('Access token:', this.accessToken);
-  // console.log('Refresh token:', this.refreshToken);
-  // console.log('Token expires at:', this.tokenExpiresAt);
+  console.log('sendAuthSuccess called');
+  console.log('Access token length:', this.accessToken ? this.accessToken.length : 0);
+  console.log('Refresh token length:', this.refreshToken ? this.refreshToken.length : 0);
+  console.log('Token expires at:', this.tokenExpiresAt);
   
   Pebble.sendAppMessage({
     1: 1, // AUTH_SUCCESS key
@@ -283,7 +287,7 @@ SpotifyAuth.prototype.sendAuthSuccess = function() {
     9: this.tokenExpiresAt // EXPIRES_AT key
   });
   
-  // console.log('Auth success message sent to C app');
+  console.log('Auth success message sent to C app');
 };
 
 SpotifyAuth.prototype.sendAuthError = function(error) {
@@ -372,12 +376,55 @@ SpotifyAuth.prototype.loadStoredTokens = function() {
   if (userTokensStr) {
     try {
       var userTokens = JSON.parse(userTokensStr);
-      this.accessToken = userTokens.access_token;
-      this.refreshToken = userTokens.refresh_token;
-      this.tokenExpiresAt = userTokens.expiration_date;
+      var newAccessToken = userTokens.access_token;
+      var newRefreshToken = userTokens.refresh_token;
+      var newTokenExpiresAt = userTokens.expiration_date;
+      
+      console.log('Loaded tokens from localStorage');
+      console.log('Token expires at:', newTokenExpiresAt);
+      console.log('Current time:', Date.now());
+      console.log('Token valid:', Date.now() < newTokenExpiresAt);
+      
+      // Check if tokens have changed
+      var tokensChanged = false;
+      if (this.accessToken !== newAccessToken) {
+        this.accessToken = newAccessToken;
+        tokensChanged = true;
+        console.log('Access token changed');
+      } else {
+        console.log('Access token unchanged');
+      }
+      
+      if (this.refreshToken !== newRefreshToken) {
+        this.refreshToken = newRefreshToken;
+        tokensChanged = true;
+        console.log('Refresh token changed');
+      } else {
+        console.log('Refresh token unchanged');
+      }
+      
+      if (this.tokenExpiresAt !== newTokenExpiresAt) {
+        this.tokenExpiresAt = newTokenExpiresAt;
+        tokensChanged = true;
+        console.log('Token expiration changed');
+      } else {
+        console.log('Token expiration unchanged');
+      }
+      
+      // If tokens are valid, send them to C app (only if they changed or this is first load)
+      if (this.accessToken && this.tokenExpiresAt && Date.now() < this.tokenExpiresAt) {
+        if (tokensChanged || !this.accessToken) {
+          console.log('Valid tokens found, sending to C app');
+          this.sendAuthSuccess();
+        } else {
+          console.log('Valid tokens found but unchanged, skipping C app notification');
+        }
+      }
     } catch (e) {
       console.error('Failed to parse stored tokens:', e);
     }
+  } else {
+    console.log('No tokens found in localStorage');
   }
 };
 
@@ -385,6 +432,5 @@ SpotifyAuth.prototype.loadStoredTokens = function() {
 Pebble.addEventListener('ready', function() {
   // console.log('Pebble ready event fired');
   var auth = new SpotifyAuth();
-  auth.loadStoredTokens();
   // console.log('Auth initialized');
 });

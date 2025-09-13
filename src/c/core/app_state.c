@@ -62,7 +62,10 @@ void app_state_save_auth_data(void) {
     persist_write_string(2, s_app_data.refresh_token);
     persist_write_int(3, s_app_data.token_expires_at);
     persist_write_bool(4, true);
-    // APP_LOG(APP_LOG_LEVEL_INFO, "Authentication data saved to persistent storage");
+    APP_LOG(APP_LOG_LEVEL_INFO, "Authentication data saved to persistent storage");
+    APP_LOG(APP_LOG_LEVEL_INFO, "Token length: %d", (int)strlen(s_app_data.access_token));
+  } else {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "Cannot save auth data - not authenticated or no token");
   }
 }
 
@@ -74,11 +77,13 @@ void app_state_load_auth_data(void) {
     s_app_data.token_expires_at = persist_read_int(3);
     s_app_data.is_authenticated = true;
     s_app_data.auth_state = AUTH_STATE_AUTHENTICATED;
-    // APP_LOG(APP_LOG_LEVEL_INFO, "Authentication data loaded from persistent storage");
+    APP_LOG(APP_LOG_LEVEL_INFO, "Authentication data loaded from persistent storage");
+    APP_LOG(APP_LOG_LEVEL_INFO, "Token length: %d", (int)strlen(s_app_data.access_token));
+    APP_LOG(APP_LOG_LEVEL_INFO, "Token expires at: %lu", s_app_data.token_expires_at);
   } else {
     s_app_data.is_authenticated = false;
     s_app_data.auth_state = AUTH_STATE_NONE;
-    // APP_LOG(APP_LOG_LEVEL_INFO, "No authentication data found in persistent storage");
+    APP_LOG(APP_LOG_LEVEL_INFO, "No authentication data found in persistent storage");
   }
 }
 
