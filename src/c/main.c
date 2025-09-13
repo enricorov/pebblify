@@ -64,6 +64,15 @@ typedef struct {
   int pending_volume_delta;
   time_t last_volume_fetch_time;
   int last_known_volume; // Track last known good volume
+  
+  // Bitmap caching to prevent PNG errors
+  GBitmap *cached_vol_up_bitmap;
+  GBitmap *cached_vol_down_bitmap;
+  GBitmap *cached_play_bitmap;
+  GBitmap *cached_pause_bitmap;
+  GBitmap *cached_backward_bitmap;
+  GBitmap *cached_forward_bitmap;
+  GBitmap *cached_dismiss_bitmap;
 } AppData;
 
 static AppData s_app_data;
@@ -114,6 +123,7 @@ static void show_volume_error(ButtonId button);
 static void clear_volume_error(void);
 static void request_volume_change(ButtonId button, int delta);
 static void apply_volume_change(void);
+static GBitmap* get_cached_bitmap(GBitmap **cached_bitmap, uint32_t resource_id);
 
 int main(void) {
   init_app();
@@ -434,7 +444,7 @@ static void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *
       case BUTTON_ID_UP:
         // Show skip backward icon for long press
         if (s_app_data.can_skip_prev) {
-          GBitmap *backward_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_BACKWARD);
+          GBitmap *backward_bitmap = get_cached_bitmap(&s_app_data.cached_backward_bitmap, RESOURCE_ID_IMAGE_MUSIC_ICON_BACKWARD);
           if (backward_bitmap) {
             action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_UP, backward_bitmap);
           }
@@ -443,7 +453,7 @@ static void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *
       case BUTTON_ID_DOWN:
         // Show skip forward icon for long press
         if (s_app_data.can_skip_next) {
-          GBitmap *forward_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_FORWARD);
+          GBitmap *forward_bitmap = get_cached_bitmap(&s_app_data.cached_forward_bitmap, RESOURCE_ID_IMAGE_MUSIC_ICON_FORWARD);
           if (forward_bitmap) {
             action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_DOWN, forward_bitmap);
           }
@@ -616,10 +626,10 @@ static void now_playing_update_display() {
       action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_DOWN, NULL);
     } else {
       // New simplified behavior: Volume Up, Play/Pause, Volume Down (no animation on set)
-      GBitmap *vol_up_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_UP);
-      GBitmap *play_pause_bitmap = gbitmap_create_with_resource(s_app_data.is_playing ? 
+      GBitmap *vol_up_bitmap = get_cached_bitmap(&s_app_data.cached_vol_up_bitmap, RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_UP);
+      GBitmap *play_pause_bitmap = get_cached_bitmap(&s_app_data.cached_pause_bitmap, s_app_data.is_playing ? 
         RESOURCE_ID_IMAGE_MUSIC_ICON_PAUSE : RESOURCE_ID_IMAGE_MUSIC_ICON_PLAY);
-      GBitmap *vol_down_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_DOWN);
+      GBitmap *vol_down_bitmap = get_cached_bitmap(&s_app_data.cached_vol_down_bitmap, RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_DOWN);
       
       if (vol_up_bitmap) action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_UP, vol_up_bitmap);
       if (play_pause_bitmap) action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_SELECT, play_pause_bitmap);
@@ -770,27 +780,36 @@ static void handle_api_response(DictionaryIterator *iter) {
     // APP_LOG(APP_LOG_LEVEL_INFO, "Is playing: %s", s_app_data.is_playing ? "true" : "false");
   }
   
-  // Update volume with stale data detection
+  // Update volume with aggressive stale data detection
   if (volume_tuple) {
     int api_volume = volume_tuple->value->uint8;
     
-    // Detect stale data: if API returns a volume that's significantly different from our last known volume
-    // and we have a pending volume change, it's likely stale data
+    // Always detect suspicious volume jumps, not just during pending changes
     bool is_suspicious = false;
-    if (s_app_data.volume_change_pending && s_app_data.last_known_volume >= 0) {
+    if (s_app_data.last_known_volume >= 0) {
       int volume_diff = abs(api_volume - s_app_data.last_known_volume);
-      // If the difference is more than 20% and we're not expecting such a big change, it's suspicious
-      if (volume_diff > 20 && abs(s_app_data.pending_volume_delta) <= 20) {
-        is_suspicious = true;
-      }
-      // Also detect the specific "50 bug" 
+      
+      // Detect the specific "50 bug" - if API suddenly returns 50, it's likely stale
       if (api_volume == 50 && s_app_data.last_known_volume != 50) {
         is_suspicious = true;
+        APP_LOG(APP_LOG_LEVEL_INFO, "Detected '50 bug' - API returned 50, last known was %d", s_app_data.last_known_volume);
+      }
+      
+      // Detect large unexpected jumps (more than 15% change without a pending change)
+      if (volume_diff > 15 && !s_app_data.volume_change_pending) {
+        is_suspicious = true;
+        APP_LOG(APP_LOG_LEVEL_INFO, "Detected large volume jump (%d -> %d) without pending change", s_app_data.last_known_volume, api_volume);
+      }
+      
+      // During pending changes, be more strict about what we accept
+      if (s_app_data.volume_change_pending && volume_diff > 10 && abs(s_app_data.pending_volume_delta) <= 10) {
+        is_suspicious = true;
+        APP_LOG(APP_LOG_LEVEL_INFO, "Detected unexpected volume change during pending operation");
       }
     }
     
     if (is_suspicious) {
-      APP_LOG(APP_LOG_LEVEL_INFO, "Detected stale volume data (%d), using local volume %d instead", api_volume, s_app_data.last_known_volume);
+      APP_LOG(APP_LOG_LEVEL_INFO, "Ignoring stale volume data (%d), keeping local volume %d", api_volume, s_app_data.last_known_volume);
       // Keep current local volume, don't update from API
     } else {
       s_app_data.volume_percent = api_volume;
@@ -974,11 +993,9 @@ static void show_volume_error(ButtonId button) {
   s_app_data.showing_volume_error = true;
   
   // Show dismiss icon as error indicator
-  GBitmap *error_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_ICON_DISMISS);
+  GBitmap *error_bitmap = get_cached_bitmap(&s_app_data.cached_dismiss_bitmap, RESOURCE_ID_IMAGE_ICON_DISMISS);
   if (error_bitmap) {
     action_bar_layer_set_icon(s_app_data.action_bar_layer, button, error_bitmap);
-  } else {
-    APP_LOG(APP_LOG_LEVEL_ERROR, "Failed to load dismiss icon for volume error");
   }
   
   // Clear the error after 1 second
@@ -1068,5 +1085,20 @@ static void apply_volume_change(void) {
   
   // Refresh now playing data after volume change
   app_timer_register(500, (AppTimerCallback)refresh_now_playing, NULL);
+}
+
+static GBitmap* get_cached_bitmap(GBitmap **cached_bitmap, uint32_t resource_id) {
+  // Return cached bitmap if available
+  if (*cached_bitmap) {
+    return *cached_bitmap;
+  }
+  
+  // Load and cache the bitmap
+  *cached_bitmap = gbitmap_create_with_resource(resource_id);
+  if (!*cached_bitmap) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "Failed to load bitmap resource %u", (unsigned int)resource_id);
+  }
+  
+  return *cached_bitmap;
 }
 
