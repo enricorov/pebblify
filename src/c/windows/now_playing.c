@@ -63,7 +63,7 @@ void now_playing_window_load(Window *window) {
   s_clock_layer = text_layer_create(GRect(10, bounds.size.h - 30, bounds.size.w - ACTION_BAR_WIDTH - 20, 25));
   text_layer_set_text_alignment(s_clock_layer, GTextAlignmentCenter);
   text_layer_set_font(s_clock_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
-  text_layer_set_text_color(s_clock_layer, GColorBlack);
+  text_layer_set_text_color(s_clock_layer, PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack));
   text_layer_set_background_color(s_clock_layer, GColorClear);
   layer_add_child(window_layer, text_layer_get_layer(s_clock_layer));
   
@@ -89,7 +89,7 @@ void now_playing_window_load(Window *window) {
   s_track_layer = text_layer_create(GRect(10, 5, bounds.size.w - ACTION_BAR_WIDTH - 20, track_height));
   text_layer_set_text_alignment(s_track_layer, GTextAlignmentCenter);
   text_layer_set_font(s_track_layer, track_font);
-  text_layer_set_text_color(s_track_layer, GColorBlack);
+  text_layer_set_text_color(s_track_layer, PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack));
   text_layer_set_background_color(s_track_layer, GColorClear);
   text_layer_set_overflow_mode(s_track_layer, GTextOverflowModeWordWrap);
   layer_add_child(window_layer, text_layer_get_layer(s_track_layer));
@@ -97,13 +97,13 @@ void now_playing_window_load(Window *window) {
   s_artist_layer = text_layer_create(GRect(10, 10 + track_height, bounds.size.w - ACTION_BAR_WIDTH - 20, artist_height));
   text_layer_set_text_alignment(s_artist_layer, GTextAlignmentCenter);
   text_layer_set_font(s_artist_layer, artist_font);
-  text_layer_set_text_color(s_artist_layer, GColorBlack);
+  text_layer_set_text_color(s_artist_layer, PBL_IF_COLOR_ELSE(GColorLightGray, GColorDarkGray));
   text_layer_set_background_color(s_artist_layer, GColorClear);
   text_layer_set_overflow_mode(s_artist_layer, GTextOverflowModeWordWrap);
   layer_add_child(window_layer, text_layer_get_layer(s_artist_layer));
   
-  // Set background color
-  window_set_background_color(window, GColorWhite);
+  // Set background color using compile-time macros
+  window_set_background_color(window, PBL_IF_COLOR_ELSE(GColorBlack, GColorWhite));
   
   // Update display
   now_playing_update_display();
@@ -327,11 +327,13 @@ void now_playing_update_display(void) {
   if (s_track_layer) {
     layer_set_frame(text_layer_get_layer(s_track_layer), GRect(10, 5, bounds.size.w - ACTION_BAR_WIDTH - 20, track_height));
     text_layer_set_text(s_track_layer, track_text);
+    text_layer_set_text_color(s_track_layer, PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack));
   }
 
   if (s_artist_layer) {
     layer_set_frame(text_layer_get_layer(s_artist_layer), GRect(10, 10 + track_height, bounds.size.w - ACTION_BAR_WIDTH - 20, artist_height));
     text_layer_set_text(s_artist_layer, artist_text);
+    text_layer_set_text_color(s_artist_layer, PBL_IF_COLOR_ELSE(GColorLightGray, GColorDarkGray));
   }
   
   // Update ActionBarLayer with new simplified button behavior

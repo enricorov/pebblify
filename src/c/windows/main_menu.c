@@ -39,8 +39,13 @@ void main_menu_load(Window *window) {
   
   menu_layer_set_click_config_onto_window(main_menu, window);
   
-  // Enable clock in menu layer
-  menu_layer_set_highlight_colors(main_menu, GColorBlack, GColorWhite);
+  // Set colors using compile-time macros
+  menu_layer_set_highlight_colors(main_menu, 
+    PBL_IF_COLOR_ELSE(GColorJaegerGreen, GColorBlack),
+    PBL_IF_COLOR_ELSE(GColorWhite, GColorWhite));
+  
+  // Set window background color using compile-time macros
+  window_set_background_color(window, PBL_IF_COLOR_ELSE(GColorBlack, GColorWhite));
   
   layer_add_child(window_layer, menu_layer_get_layer(main_menu));
 }
