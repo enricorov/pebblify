@@ -24,15 +24,9 @@ pebble build
 # Clean build artifacts
 pebble clean
 
-# Install the app on specific emulator
-# pebble install --emulator basalt
-
 # Install the app on specific emulator, and watch the logs
 pebble install --phone 192.168.0.209 --logs
 
-
-# Screenshot the running emulator
-pebble screenshot --no-open screenshot.png
 ```
 
 If you need more information on the `pebble` command or a sub-command, append `--help`.
@@ -91,4 +85,4 @@ Key Entry Points:
 
 ## AI Code Review Guidelines
 
-- Once you think you've fulfilled the user's request, ask yourself if you see any issues with the current screenshot, and if there are any differences between the screenshot and the reference image or the user's description. If so, fix them.
+- Once you think you've fulfilled the user's request, ask yourself if you see any issues in the    logs.

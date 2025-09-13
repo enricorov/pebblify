@@ -8,6 +8,7 @@
 void now_playing_init(void);
 void now_playing_deinit(void);
 void now_playing_window_create(void);
+void now_playing_window_pop(void);
 void now_playing_window_destroy(void);
 void now_playing_window_load(Window *window);
 void now_playing_window_unload(Window *window);

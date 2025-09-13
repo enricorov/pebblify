@@ -1,5 +1,6 @@
 #include "auth_window.h"
 #include "../api/spotify_api.h"
+#include "../core/app_state.h"
 
 void auth_window_init(void) {
   // Authentication window will be created when needed
@@ -41,7 +42,7 @@ void auth_window_load(Window *window) {
   TextLayer *title_layer = text_layer_create(GRect(10, 20, bounds.size.w - 20, 30));
   text_layer_set_text_alignment(title_layer, GTextAlignmentCenter);
   text_layer_set_font(title_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
-  text_layer_set_text_color(title_layer, GColorWhite);
+  text_layer_set_text_color(title_layer, PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack));
   text_layer_set_background_color(title_layer, GColorClear);
   text_layer_set_text(title_layer, "Pebblify");
   layer_add_child(window_layer, text_layer_get_layer(title_layer));
@@ -49,7 +50,7 @@ void auth_window_load(Window *window) {
   TextLayer *subtitle_layer = text_layer_create(GRect(10, 50, bounds.size.w - 20, 40));
   text_layer_set_text_alignment(subtitle_layer, GTextAlignmentCenter);
   text_layer_set_font(subtitle_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
-  text_layer_set_text_color(subtitle_layer, GColorWhite);
+  text_layer_set_text_color(subtitle_layer, PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack));
   text_layer_set_background_color(subtitle_layer, GColorClear);
   text_layer_set_text(subtitle_layer, "Connect to Spotify");
   layer_add_child(window_layer, text_layer_get_layer(subtitle_layer));
@@ -57,17 +58,18 @@ void auth_window_load(Window *window) {
   TextLayer *instruction_layer = text_layer_create(GRect(10, 100, bounds.size.w - 20, 60));
   text_layer_set_text_alignment(instruction_layer, GTextAlignmentCenter);
   text_layer_set_font(instruction_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
-  text_layer_set_text_color(instruction_layer, GColorWhite);
+  text_layer_set_text_color(instruction_layer, PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack));
   text_layer_set_background_color(instruction_layer, GColorClear);
   text_layer_set_text(instruction_layer, "Press SELECT to authorize\nwith Spotify");
   layer_add_child(window_layer, text_layer_get_layer(instruction_layer));
   
-  // Set background color
-  window_set_background_color(window, GColorJaegerGreen);
+  // Set background color using compile-time macros
+  window_set_background_color(window, PBL_IF_COLOR_ELSE(GColorJaegerGreen, GColorBlack));
 }
 
 void auth_window_unload(Window *window) {
-  // Clean up if needed
+  // Text layers are created locally in auth_window_load and should be cleaned up automatically
+  // when the window is destroyed. No explicit cleanup needed for local variables.
 }
 
 void auth_click_config_provider(void *context) {

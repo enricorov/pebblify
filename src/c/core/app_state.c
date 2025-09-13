@@ -29,6 +29,7 @@ void app_state_deinit(void) {
   // Clean up timers
   if (s_app_data.volume_error_timer) {
     app_timer_cancel(s_app_data.volume_error_timer);
+    s_app_data.volume_error_timer = NULL;
   }
   
   // Clean up cached bitmaps

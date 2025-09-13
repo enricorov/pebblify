@@ -1,5 +1,6 @@
 #include "now_playing.h"
 #include "../api/spotify_api.h"
+#include "../core/app_state.h"
 
 // Volume control settings
 // Change this value to adjust volume step size (1-100)
@@ -17,8 +18,10 @@ static AppTimer *s_clock_timer;
 void now_playing_init(void) {
   // Initialize now playing data
   s_app_data.is_active_session = false;
-  strcpy(s_app_data.track_name, "No active session");
-  strcpy(s_app_data.artist_name, "");
+  strncpy(s_app_data.track_name, "No active session", sizeof(s_app_data.track_name) - 1);
+  s_app_data.track_name[sizeof(s_app_data.track_name) - 1] = '\0';
+  strncpy(s_app_data.artist_name, "", sizeof(s_app_data.artist_name) - 1);
+  s_app_data.artist_name[sizeof(s_app_data.artist_name) - 1] = '\0';
   s_app_data.is_playing = false;
   s_app_data.volume_percent = 50;
   s_app_data.can_skip_prev = true;
@@ -30,10 +33,13 @@ void now_playing_deinit(void) {
 }
 
 void now_playing_window_create(void) {
+  // If window already exists, just push it to the stack
   if (s_app_data.now_playing_window) {
-    return; // Already exists
+    window_stack_push(s_app_data.now_playing_window, true);
+    return;
   }
   
+  // Create new window only if it doesn't exist
   s_app_data.now_playing_window = window_create();
   window_set_window_handlers(s_app_data.now_playing_window, (WindowHandlers) {
     .load = now_playing_window_load,
@@ -43,11 +49,40 @@ void now_playing_window_create(void) {
   window_stack_push(s_app_data.now_playing_window, true);
 }
 
+void now_playing_window_pop(void) {
+  // Just pop the window from the stack, don't destroy it
+  if (s_app_data.now_playing_window && window_stack_get_top_window() == s_app_data.now_playing_window) {
+    // Clean up timers before popping to prevent timer leaks
+    if (s_refresh_timer) {
+      app_timer_cancel(s_refresh_timer);
+      s_refresh_timer = NULL;
+    }
+    if (s_clock_timer) {
+      app_timer_cancel(s_clock_timer);
+      s_clock_timer = NULL;
+    }
+    if (s_app_data.volume_error_timer) {
+      app_timer_cancel(s_app_data.volume_error_timer);
+      s_app_data.volume_error_timer = NULL;
+    }
+    
+    window_stack_pop(true);
+    s_app_data.current_state = APP_STATE_MAIN_MENU;
+  }
+}
+
 void now_playing_window_destroy(void) {
   if (s_app_data.now_playing_window) {
-    window_stack_pop(true);
+    // First, make sure we're not on the window stack anymore
+    if (window_stack_get_top_window() == s_app_data.now_playing_window) {
+      window_stack_pop(true);
+    }
+    
     window_destroy(s_app_data.now_playing_window);
     s_app_data.now_playing_window = NULL;
+    
+    // Reset app state to main menu when now playing window is destroyed
+    s_app_data.current_state = APP_STATE_MAIN_MENU;
   }
 }
 
@@ -110,11 +145,15 @@ void now_playing_window_load(Window *window) {
   
   // Start clock timer (update every minute)
   now_playing_update_clock();
-  s_clock_timer = app_timer_register(60000, (AppTimerCallback)now_playing_update_clock, NULL);
   
   // Refresh current track data
   if (s_app_data.is_authenticated) {
     spotify_api_refresh_now_playing();
+    
+    // Cancel any existing refresh timer before creating a new one
+    if (s_refresh_timer) {
+      app_timer_cancel(s_refresh_timer);
+    }
     
     // Set up periodic refresh every 10 seconds
     s_refresh_timer = app_timer_register(10000, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
@@ -122,10 +161,18 @@ void now_playing_window_load(Window *window) {
 }
 
 void now_playing_window_unload(Window *window) {
-  // Clean up timer
+  // Clean up ALL timers
   if (s_refresh_timer) {
     app_timer_cancel(s_refresh_timer);
     s_refresh_timer = NULL;
+  }
+  if (s_clock_timer) {
+    app_timer_cancel(s_clock_timer);
+    s_clock_timer = NULL;
+  }
+  if (s_app_data.volume_error_timer) {
+    app_timer_cancel(s_app_data.volume_error_timer);
+    s_app_data.volume_error_timer = NULL;
   }
   
   // Clean up layers
@@ -144,14 +191,6 @@ void now_playing_window_unload(Window *window) {
   if (s_action_bar_layer) {
     action_bar_layer_destroy(s_action_bar_layer);
     s_action_bar_layer = NULL;
-  }
-  if (s_clock_timer) {
-    app_timer_cancel(s_clock_timer);
-    s_clock_timer = NULL;
-  }
-  if (s_app_data.volume_error_timer) {
-    app_timer_cancel(s_app_data.volume_error_timer);
-    s_app_data.volume_error_timer = NULL;
   }
 }
 
@@ -208,6 +247,7 @@ void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *context
   }
   
   // Restore original icons after a short delay to show the action was performed
+  // Note: This is a one-shot timer that will clean itself up
   app_timer_register(700, (AppTimerCallback)now_playing_update_display, NULL);
 }
 
@@ -232,8 +272,10 @@ void now_playing_click_handler(ClickRecognizerRef recognizer, void *context) {
 void now_playing_handle_action(ButtonId button) {
   if (!s_app_data.is_active_session) {
     // Show helpful message when no active session
-    strcpy(s_app_data.track_name, "No Active Session");
-    strcpy(s_app_data.artist_name, "Start playing music on Spotify");
+    strncpy(s_app_data.track_name, "No Active Session", sizeof(s_app_data.track_name) - 1);
+    s_app_data.track_name[sizeof(s_app_data.track_name) - 1] = '\0';
+    strncpy(s_app_data.artist_name, "Start playing music on Spotify", sizeof(s_app_data.artist_name) - 1);
+    s_app_data.artist_name[sizeof(s_app_data.artist_name) - 1] = '\0';
     now_playing_update_display();
     return;
   }
@@ -269,6 +311,12 @@ void now_playing_update_display(void) {
     return;
   }
   
+  // Additional safety check - ensure window is still valid
+  if (window_stack_get_top_window() != s_app_data.now_playing_window) {
+    // Window is not on top of stack, don't update display
+    return;
+  }
+  
   // Determine the text content for each layer
   const char *track_text;
   const char *artist_text;
@@ -283,6 +331,10 @@ void now_playing_update_display(void) {
   
   // Get window bounds for width calculation
   Layer *window_layer = window_get_root_layer(s_app_data.now_playing_window);
+  if (!window_layer) {
+    return; // Window layer is invalid
+  }
+  
   GRect bounds = layer_get_bounds(window_layer);
   
   // Calculate dynamic heights for the new text content
@@ -360,10 +412,11 @@ void now_playing_update_display(void) {
 }
 
 void now_playing_update_clock(void) {
-  if (!s_clock_layer) {
+  // Safety check - only update clock if window and layer are still valid
+  if (!s_app_data.now_playing_window || !s_clock_layer || window_stack_get_top_window() != s_app_data.now_playing_window) {
     return;
   }
-
+  
   time_t now = time(NULL);
   struct tm *tick_time = localtime(&now);
   
@@ -371,6 +424,11 @@ void now_playing_update_clock(void) {
   strftime(clock_text, sizeof(clock_text), "%H:%M", tick_time);
   
   text_layer_set_text(s_clock_layer, clock_text);
+  
+  // Cancel the previous timer before registering a new one
+  if (s_clock_timer) {
+    app_timer_cancel(s_clock_timer);
+  }
   
   // Restart timer for next update (every minute)
   s_clock_timer = app_timer_register(60000, (AppTimerCallback)now_playing_update_clock, NULL);
@@ -432,6 +490,7 @@ void now_playing_apply_volume_change(void) {
   s_app_data.pending_volume_delta = 0;
   
   // Refresh now playing data after volume change
+  // Note: This is a one-shot timer that will clean itself up
   app_timer_register(500, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
 }
 
@@ -441,6 +500,12 @@ void now_playing_show_volume_error(ButtonId button) {
   }
   
   APP_LOG(APP_LOG_LEVEL_INFO, "Showing volume error for button %d", button);
+  
+  // Cancel any existing volume error timer first
+  if (s_app_data.volume_error_timer) {
+    app_timer_cancel(s_app_data.volume_error_timer);
+    s_app_data.volume_error_timer = NULL;
+  }
   
   // Set flag to prevent display updates from overriding error icon
   s_app_data.showing_volume_error = true;
@@ -456,6 +521,13 @@ void now_playing_show_volume_error(ButtonId button) {
 }
 
 void now_playing_clear_volume_error(void) {
+  // Safety check - only clear error if window is still valid
+  if (!s_app_data.now_playing_window || window_stack_get_top_window() != s_app_data.now_playing_window) {
+    s_app_data.showing_volume_error = false;
+    s_app_data.volume_error_timer = NULL;
+    return;
+  }
+  
   // Clear the error flag
   s_app_data.showing_volume_error = false;
   

@@ -1,8 +1,10 @@
 #include "main_menu.h"
 #include "now_playing.h"
+#include "../core/app_state.h"
 
-// Forward declaration for now playing window creation
+// Forward declarations
 extern void now_playing_window_create(void);
+extern void click_config_provider(void *context);
 
 void main_menu_init(void) {
   // Create main window
@@ -11,6 +13,10 @@ void main_menu_init(void) {
     .load = main_menu_load,
     .unload = main_menu_unload,
   });
+  
+  // Note: Menu layer handles its own click configuration
+  // Back button behavior is handled by the system when no custom handler is set
+  
   window_stack_push(s_app_data.main_window, true);
 }
 
@@ -51,8 +57,8 @@ void main_menu_load(Window *window) {
 }
 
 void main_menu_unload(Window *window) {
-  // Clean up menu layer - the menu layer will be automatically destroyed
-  // when the window is destroyed, so we don't need to do anything here
+  // MenuLayer is created locally in main_menu_load and should be cleaned up automatically
+  // when the window is destroyed. No explicit cleanup needed for local variables.
 }
 
 uint16_t main_menu_get_num_sections_callback(MenuLayer *menu_layer, void *data) {

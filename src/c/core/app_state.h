@@ -21,6 +21,16 @@ typedef enum {
   AUTH_STATE_ERROR
 } AuthState;
 
+// Color theme structure - simplified for compile-time macros
+typedef struct {
+  GColor background;
+  GColor foreground;
+  GColor highlight;
+  GColor highlight_text;
+  GColor accent;
+  GColor secondary;
+} ColorTheme;
+
 // Core app data structure
 typedef struct {
   AppState current_state;

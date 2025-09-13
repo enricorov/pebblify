@@ -38,11 +38,8 @@ void spotify_api_refresh_now_playing(void) {
   // APP_LOG(APP_LOG_LEVEL_INFO, "refresh_now_playing called");
   spotify_api_make_call("/me/player", "GET", NULL);
   
-  // Restart the periodic refresh timer if now playing window is active
-  if (s_app_data.now_playing_window && s_app_data.is_authenticated) {
-    app_timer_register(10000, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
-    // Note: In the modular version, we'd need to store this timer in the now_playing module
-  }
+  // Note: Timer management is handled by the now_playing module
+  // This function should not create its own timers to avoid conflicts
 }
 
 void spotify_api_play_pause_track(void) {
@@ -51,18 +48,21 @@ void spotify_api_play_pause_track(void) {
   snprintf(path, sizeof(path), "/me/player/%s", action);
   spotify_api_make_call(path, "PUT", NULL);
   // Refresh now playing data after play/pause
+  // Note: This is a one-shot timer that will clean itself up
   app_timer_register(500, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
 }
 
 void spotify_api_skip_to_next(void) {
   spotify_api_make_call("/me/player/next", "POST", NULL);
   // Refresh now playing data after skipping
+  // Note: This is a one-shot timer that will clean itself up
   app_timer_register(500, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
 }
 
 void spotify_api_skip_to_previous(void) {
   spotify_api_make_call("/me/player/previous", "POST", NULL);
   // Refresh now playing data after skipping
+  // Note: This is a one-shot timer that will clean itself up
   app_timer_register(500, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
 }
 
