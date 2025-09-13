@@ -52,6 +52,18 @@ typedef struct {
   ActionBarLayer *action_bar_layer;
   AppTimer *refresh_timer;
   AppTimer *clock_timer;
+  
+  // Volume control error state
+  ButtonId volume_error_button;
+  AppTimer *volume_error_timer;
+  bool showing_volume_error;
+  
+  // Volume control state
+  bool volume_change_pending;
+  ButtonId pending_volume_button;
+  int pending_volume_delta;
+  time_t last_volume_fetch_time;
+  int last_known_volume; // Track last known good volume
 } AppData;
 
 static AppData s_app_data;
@@ -86,7 +98,7 @@ static void refresh_now_playing(void);
 static void play_pause_track(void);
 static void skip_to_next(void);
 static void skip_to_previous(void);
-static void set_volume(int volume_percent);
+static void set_volume(int volume_percent, ButtonId button);
 static int calculate_text_height(const char *text, GFont font, int width);
 
 // Now playing window functions
@@ -98,6 +110,10 @@ static void now_playing_click_config_provider(void *context);
 static void now_playing_update_display(void);
 static void now_playing_handle_action(ButtonId button);
 static void update_clock(void);
+static void show_volume_error(ButtonId button);
+static void clear_volume_error(void);
+static void request_volume_change(ButtonId button, int delta);
+static void apply_volume_change(void);
 
 int main(void) {
   init_app();
@@ -112,7 +128,7 @@ static void save_auth_data(void) {
     persist_write_string(2, s_app_data.refresh_token);
     persist_write_int(3, s_app_data.token_expires_at);
     persist_write_bool(4, true);
-    APP_LOG(APP_LOG_LEVEL_INFO, "Authentication data saved to persistent storage");
+    // APP_LOG(APP_LOG_LEVEL_INFO, "Authentication data saved to persistent storage");
   }
 }
 
@@ -124,11 +140,11 @@ static void load_auth_data(void) {
     s_app_data.token_expires_at = persist_read_int(3);
     s_app_data.is_authenticated = true;
     s_app_data.auth_state = AUTH_STATE_AUTHENTICATED;
-    APP_LOG(APP_LOG_LEVEL_INFO, "Authentication data loaded from persistent storage");
+    // APP_LOG(APP_LOG_LEVEL_INFO, "Authentication data loaded from persistent storage");
   } else {
     s_app_data.is_authenticated = false;
     s_app_data.auth_state = AUTH_STATE_NONE;
-    APP_LOG(APP_LOG_LEVEL_INFO, "No authentication data found in persistent storage");
+    // APP_LOG(APP_LOG_LEVEL_INFO, "No authentication data found in persistent storage");
   }
 }
 
@@ -138,7 +154,7 @@ static void clear_auth_data(void) {
   persist_delete(2);
   persist_delete(3);
   persist_delete(4);
-  APP_LOG(APP_LOG_LEVEL_INFO, "Authentication data cleared from persistent storage");
+  // APP_LOG(APP_LOG_LEVEL_INFO, "Authentication data cleared from persistent storage");
 }
 
 static void init_app(void) {
@@ -146,6 +162,7 @@ static void init_app(void) {
   memset(&s_app_data, 0, sizeof(AppData));
   s_app_data.current_state = APP_STATE_AUTH_REQUIRED;
   s_app_data.auth_state = AUTH_STATE_NONE;
+  s_app_data.last_known_volume = -1; // Initialize to invalid value
   
   // Set up AppMessage
   app_message_register_inbox_received(app_message_handler);
@@ -159,11 +176,11 @@ static void init_app(void) {
   // Load authentication data from persistent storage
   load_auth_data();
   
-  APP_LOG(APP_LOG_LEVEL_INFO, "Auth state after load: %d, is_authenticated: %s", 
-          s_app_data.auth_state, s_app_data.is_authenticated ? "true" : "false");
+  // APP_LOG(APP_LOG_LEVEL_INFO, "Auth state after load: %d, is_authenticated: %s", 
+  //         s_app_data.auth_state, s_app_data.is_authenticated ? "true" : "false");
   
   // Always create main window first (this will be the base layer)
-  APP_LOG(APP_LOG_LEVEL_INFO, "Creating main window as base layer");
+  // APP_LOG(APP_LOG_LEVEL_INFO, "Creating main window as base layer");
   s_app_data.current_state = APP_STATE_MAIN_MENU;
   s_app_data.main_window = window_create();
   window_set_window_handlers(s_app_data.main_window, (WindowHandlers) {
@@ -174,7 +191,7 @@ static void init_app(void) {
   
   if (s_app_data.auth_state != AUTH_STATE_AUTHENTICATED) {
     // Not authenticated - create auth window on top of main window
-    APP_LOG(APP_LOG_LEVEL_INFO, "Not authenticated, creating auth window on top");
+    // APP_LOG(APP_LOG_LEVEL_INFO, "Not authenticated, creating auth window on top");
     s_app_data.auth_window = window_create();
     window_set_window_handlers(s_app_data.auth_window, (WindowHandlers) {
       .load = auth_window_load,
@@ -182,7 +199,7 @@ static void init_app(void) {
     });
     window_stack_push(s_app_data.auth_window, true);
   } else {
-    APP_LOG(APP_LOG_LEVEL_INFO, "Already authenticated, main window is visible");
+    // APP_LOG(APP_LOG_LEVEL_INFO, "Already authenticated, main window is visible");
   }
 }
 
@@ -202,7 +219,7 @@ static void deinit_app(void) {
 }
 
 static void main_window_load(Window *window) {
-  APP_LOG(APP_LOG_LEVEL_INFO, "Main window load called");
+  // APP_LOG(APP_LOG_LEVEL_INFO, "Main window load called");
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
   
@@ -397,6 +414,10 @@ static void now_playing_window_unload(Window *window) {
     app_timer_cancel(s_app_data.clock_timer);
     s_app_data.clock_timer = NULL;
   }
+  if (s_app_data.volume_error_timer) {
+    app_timer_cancel(s_app_data.volume_error_timer);
+    s_app_data.volume_error_timer = NULL;
+  }
 }
 
 static void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *context) {
@@ -407,25 +428,33 @@ static void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *
     return; // No action for long press when no active session
   }
   
-  // Change icons to show track navigation mode
+  // Set long press icons before performing action
   if (s_app_data.action_bar_layer) {
     switch (button) {
       case BUTTON_ID_UP:
-        // Show previous track icon
-        action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_UP, 
-          gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_BACKWARD));
+        // Show skip backward icon for long press
+        if (s_app_data.can_skip_prev) {
+          GBitmap *backward_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_BACKWARD);
+          if (backward_bitmap) {
+            action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_UP, backward_bitmap);
+          }
+        }
         break;
       case BUTTON_ID_DOWN:
-        // Show next track icon
-        action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_DOWN, 
-          gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_FORWARD));
+        // Show skip forward icon for long press
+        if (s_app_data.can_skip_next) {
+          GBitmap *forward_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_FORWARD);
+          if (forward_bitmap) {
+            action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_DOWN, forward_bitmap);
+          }
+        }
         break;
       default:
         break;
     }
   }
   
-  // Perform the track navigation action
+  // Perform the track navigation action immediately
   switch (button) {
     case BUTTON_ID_UP:
       // Previous track (long press)
@@ -443,8 +472,8 @@ static void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *
       break;
   }
   
-  // Restore original icons after a brief delay to show the change
-  app_timer_register(300, (AppTimerCallback)now_playing_update_display, NULL);
+  // Restore original icons after a short delay to show the action was performed
+  app_timer_register(500, (AppTimerCallback)now_playing_update_display, NULL);
 }
 
 static void now_playing_click_config_provider(void *context) {
@@ -454,8 +483,8 @@ static void now_playing_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_DOWN, now_playing_click_handler);
   
   // Long clicks for track navigation
-  window_long_click_subscribe(BUTTON_ID_UP, 200, now_playing_long_click_handler, NULL);
-  window_long_click_subscribe(BUTTON_ID_DOWN, 200, now_playing_long_click_handler, NULL);
+  window_long_click_subscribe(BUTTON_ID_UP, 300, now_playing_long_click_handler, NULL);
+  window_long_click_subscribe(BUTTON_ID_DOWN, 300, now_playing_long_click_handler, NULL);
 }
 
 
@@ -476,6 +505,9 @@ static void now_playing_handle_action(ButtonId button) {
     return;
   }
   
+  // Ensure action bar icons are in correct state before handling action
+  now_playing_update_display();
+  
   // New simplified button behavior:
   // UP - Volume Up
   // SELECT - Play/Pause  
@@ -483,41 +515,21 @@ static void now_playing_handle_action(ButtonId button) {
   switch (button) {
     case BUTTON_ID_UP:
       // Volume up
-      if (s_app_data.volume_percent < 100) {
-        s_app_data.volume_percent = (s_app_data.volume_percent + 10 > 100) ? 100 : s_app_data.volume_percent + 10;
-        APP_LOG(APP_LOG_LEVEL_INFO, "Volume up pressed, new volume: %d%%", s_app_data.volume_percent);
-        set_volume(s_app_data.volume_percent);
-        // Update display immediately to show new volume
-        now_playing_update_display();
-        // Refresh now playing data after volume change
-        app_timer_register(500, (AppTimerCallback)refresh_now_playing, NULL);
-      } else {
-        APP_LOG(APP_LOG_LEVEL_INFO, "Volume already at maximum");
-      }
+      request_volume_change(BUTTON_ID_UP, 5);
       break;
     case BUTTON_ID_SELECT:
       // Play/pause
       play_pause_track();
+      // Ensure icons are updated after play/pause state change
+      now_playing_update_display();
       break;
     case BUTTON_ID_DOWN:
       // Volume down
-      if (s_app_data.volume_percent > 0) {
-        s_app_data.volume_percent = (s_app_data.volume_percent - 10 < 0) ? 0 : s_app_data.volume_percent - 10;
-        APP_LOG(APP_LOG_LEVEL_INFO, "Volume down pressed, new volume: %d%%", s_app_data.volume_percent);
-        set_volume(s_app_data.volume_percent);
-        // Update display immediately to show new volume
-        now_playing_update_display();
-        // Refresh now playing data after volume change
-        app_timer_register(500, (AppTimerCallback)refresh_now_playing, NULL);
-      } else {
-        APP_LOG(APP_LOG_LEVEL_INFO, "Volume already at minimum");
-      }
+      request_volume_change(BUTTON_ID_DOWN, -5);
       break;
     default:
       break;
   }
-  
-  now_playing_update_display();
 }
 
 
@@ -526,8 +538,8 @@ static void now_playing_update_display() {
     return;
   }
   
-  APP_LOG(APP_LOG_LEVEL_INFO, "Updating display - track: '%s', artist: '%s', active: %s", 
-          s_app_data.track_name, s_app_data.artist_name, s_app_data.is_active_session ? "true" : "false");
+  // APP_LOG(APP_LOG_LEVEL_INFO, "Updating display - track: '%s', artist: '%s', active: %s", 
+  //         s_app_data.track_name, s_app_data.artist_name, s_app_data.is_active_session ? "true" : "false");
   
   // Determine the text content for each layer
   const char *track_text;
@@ -595,7 +607,8 @@ static void now_playing_update_display() {
   }
   
   // Update ActionBarLayer with new simplified button behavior
-  if (s_app_data.action_bar_layer) {
+  // Skip updating action bar icons if we're showing a volume error
+  if (s_app_data.action_bar_layer && !s_app_data.showing_volume_error) {
     if (!s_app_data.is_active_session) {
       // No active session - clear all icons
       action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_UP, NULL);
@@ -603,13 +616,14 @@ static void now_playing_update_display() {
       action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_DOWN, NULL);
     } else {
       // New simplified behavior: Volume Up, Play/Pause, Volume Down (no animation on set)
-      action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_UP, 
-        gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_UP));
-      action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_SELECT, 
-        gbitmap_create_with_resource(s_app_data.is_playing ? 
-          RESOURCE_ID_IMAGE_MUSIC_ICON_PAUSE : RESOURCE_ID_IMAGE_MUSIC_ICON_PLAY));
-      action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_DOWN, 
-        gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_DOWN));
+      GBitmap *vol_up_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_UP);
+      GBitmap *play_pause_bitmap = gbitmap_create_with_resource(s_app_data.is_playing ? 
+        RESOURCE_ID_IMAGE_MUSIC_ICON_PAUSE : RESOURCE_ID_IMAGE_MUSIC_ICON_PLAY);
+      GBitmap *vol_down_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_DOWN);
+      
+      if (vol_up_bitmap) action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_UP, vol_up_bitmap);
+      if (play_pause_bitmap) action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_SELECT, play_pause_bitmap);
+      if (vol_down_bitmap) action_bar_layer_set_icon(s_app_data.action_bar_layer, BUTTON_ID_DOWN, vol_down_bitmap);
     }
   }
 }
@@ -678,7 +692,7 @@ static void request_authentication(void) {
 }
 
 static void handle_auth_success(DictionaryIterator *iter) {
-  APP_LOG(APP_LOG_LEVEL_INFO, "Authentication successful, switching to main menu");
+  // APP_LOG(APP_LOG_LEVEL_INFO, "Authentication successful, switching to main menu");
   s_app_data.auth_state = AUTH_STATE_AUTHENTICATED;
   s_app_data.is_authenticated = true;
   
@@ -703,13 +717,13 @@ static void handle_auth_success(DictionaryIterator *iter) {
   save_auth_data();
   
   // Simple approach: just pop the auth window (main menu is already underneath)
-  APP_LOG(APP_LOG_LEVEL_INFO, "Authentication successful, popping auth window");
+  // APP_LOG(APP_LOG_LEVEL_INFO, "Authentication successful, popping auth window");
   
   if (s_app_data.auth_window) {
     window_stack_pop(true);
     window_destroy(s_app_data.auth_window);
     s_app_data.auth_window = NULL;
-    APP_LOG(APP_LOG_LEVEL_INFO, "Auth window popped and destroyed, main menu now visible");
+    // APP_LOG(APP_LOG_LEVEL_INFO, "Auth window popped and destroyed, main menu now visible");
   }
 }
 
@@ -726,7 +740,7 @@ static void handle_auth_error(DictionaryIterator *iter) {
 }
 
 static void handle_api_response(DictionaryIterator *iter) {
-  APP_LOG(APP_LOG_LEVEL_INFO, "Received API response");
+  // APP_LOG(APP_LOG_LEVEL_INFO, "Received API response");
   
   // Get parsed data from JavaScript
   Tuple *track_name_tuple = dict_find(iter, 15); // TRACK_NAME key
@@ -740,26 +754,49 @@ static void handle_api_response(DictionaryIterator *iter) {
   if (track_name_tuple) {
     strncpy(s_app_data.track_name, track_name_tuple->value->cstring, sizeof(s_app_data.track_name) - 1);
     s_app_data.track_name[sizeof(s_app_data.track_name) - 1] = '\0';
-    APP_LOG(APP_LOG_LEVEL_INFO, "Track name: %s", s_app_data.track_name);
+    // APP_LOG(APP_LOG_LEVEL_INFO, "Track name: %s", s_app_data.track_name);
   }
   
   // Update artist name
   if (artist_name_tuple) {
     strncpy(s_app_data.artist_name, artist_name_tuple->value->cstring, sizeof(s_app_data.artist_name) - 1);
     s_app_data.artist_name[sizeof(s_app_data.artist_name) - 1] = '\0';
-    APP_LOG(APP_LOG_LEVEL_INFO, "Artist name: %s", s_app_data.artist_name);
+    // APP_LOG(APP_LOG_LEVEL_INFO, "Artist name: %s", s_app_data.artist_name);
   }
   
   // Update playing status
   if (is_playing_tuple) {
     s_app_data.is_playing = (is_playing_tuple->value->uint8 == 1);
-    APP_LOG(APP_LOG_LEVEL_INFO, "Is playing: %s", s_app_data.is_playing ? "true" : "false");
+    // APP_LOG(APP_LOG_LEVEL_INFO, "Is playing: %s", s_app_data.is_playing ? "true" : "false");
   }
   
-  // Update volume
+  // Update volume with stale data detection
   if (volume_tuple) {
-    s_app_data.volume_percent = volume_tuple->value->uint8;
-    APP_LOG(APP_LOG_LEVEL_INFO, "Volume: %d%%", s_app_data.volume_percent);
+    int api_volume = volume_tuple->value->uint8;
+    
+    // Detect stale data: if API returns a volume that's significantly different from our last known volume
+    // and we have a pending volume change, it's likely stale data
+    bool is_suspicious = false;
+    if (s_app_data.volume_change_pending && s_app_data.last_known_volume >= 0) {
+      int volume_diff = abs(api_volume - s_app_data.last_known_volume);
+      // If the difference is more than 20% and we're not expecting such a big change, it's suspicious
+      if (volume_diff > 20 && abs(s_app_data.pending_volume_delta) <= 20) {
+        is_suspicious = true;
+      }
+      // Also detect the specific "50 bug" 
+      if (api_volume == 50 && s_app_data.last_known_volume != 50) {
+        is_suspicious = true;
+      }
+    }
+    
+    if (is_suspicious) {
+      APP_LOG(APP_LOG_LEVEL_INFO, "Detected stale volume data (%d), using local volume %d instead", api_volume, s_app_data.last_known_volume);
+      // Keep current local volume, don't update from API
+    } else {
+      s_app_data.volume_percent = api_volume;
+      s_app_data.last_known_volume = api_volume; // Update last known good volume
+      APP_LOG(APP_LOG_LEVEL_INFO, "Volume from API: %d%%", s_app_data.volume_percent);
+    }
   }
   
   // Update skip permissions
@@ -771,6 +808,12 @@ static void handle_api_response(DictionaryIterator *iter) {
   }
   
   s_app_data.is_active_session = true;
+  
+  // If we have a pending volume change, apply it now that we have current volume
+  if (s_app_data.volume_change_pending) {
+    apply_volume_change();
+    return; // Skip normal display update since apply_volume_change handles it
+  }
   
   // Update display if now playing window is active
   if (s_app_data.now_playing_window) {
@@ -785,12 +828,9 @@ static void handle_api_error(DictionaryIterator *iter) {
     
     // Check for specific error types
     if (strstr(error_tuple->value->cstring, "403")) {
-      // Volume control failed - show a temporary message
-      strcpy(s_app_data.track_name, "Volume control not available");
-      strcpy(s_app_data.artist_name, "Device may not support volume control");
-      
-      // Auto-clear the error message after 3 seconds
-      app_timer_register(3000, (AppTimerCallback)refresh_now_playing, NULL);
+      // Volume control failed - show X icon on the button that failed
+      APP_LOG(APP_LOG_LEVEL_INFO, "Volume control failed (403), showing error for button %d", s_app_data.volume_error_button);
+      show_volume_error(s_app_data.volume_error_button);
     } else if (strstr(error_tuple->value->cstring, "401")) {
       // Authentication error - token may be expired
       strcpy(s_app_data.track_name, "Authentication expired");
@@ -821,23 +861,23 @@ static void app_message_handler(DictionaryIterator *iter, void *context) {
   Tuple *api_response_tuple = dict_find(iter, 5); // API_RESPONSE
   Tuple *api_error_tuple = dict_find(iter, 6);    // API_ERROR
   
-  APP_LOG(APP_LOG_LEVEL_INFO, "Message received - auth_success: %d, auth_error: %d, api_response: %d, api_error: %d", 
-          auth_success_tuple ? 1 : 0, auth_error_tuple ? 1 : 0, api_response_tuple ? 1 : 0, api_error_tuple ? 1 : 0);
+  // APP_LOG(APP_LOG_LEVEL_INFO, "Message received - auth_success: %d, auth_error: %d, api_response: %d, api_error: %d", 
+  //         auth_success_tuple ? 1 : 0, auth_error_tuple ? 1 : 0, api_response_tuple ? 1 : 0, api_error_tuple ? 1 : 0);
   
   if (auth_success_tuple) {
-    APP_LOG(APP_LOG_LEVEL_INFO, "Calling handle_auth_success");
+    // APP_LOG(APP_LOG_LEVEL_INFO, "Calling handle_auth_success");
     handle_auth_success(iter);
   } else if (auth_error_tuple) {
-    APP_LOG(APP_LOG_LEVEL_INFO, "Calling handle_auth_error");
+    // APP_LOG(APP_LOG_LEVEL_INFO, "Calling handle_auth_error");
     handle_auth_error(iter);
   } else if (api_response_tuple) {
-    APP_LOG(APP_LOG_LEVEL_INFO, "Handling API response");
+    // APP_LOG(APP_LOG_LEVEL_INFO, "Handling API response");
     handle_api_response(iter);
   } else if (api_error_tuple) {
-    APP_LOG(APP_LOG_LEVEL_INFO, "Handling API error");
+    // APP_LOG(APP_LOG_LEVEL_INFO, "Handling API error");
     handle_api_error(iter);
   } else {
-    APP_LOG(APP_LOG_LEVEL_INFO, "Unknown message type received");
+    // APP_LOG(APP_LOG_LEVEL_INFO, "Unknown message type received");
   }
 }
 
@@ -864,13 +904,13 @@ static void make_spotify_api_call(const char *path, const char *method, const ch
   }
   
   // Debug: Log the API call being made
-  APP_LOG(APP_LOG_LEVEL_INFO, "Making Spotify API call: %s %s", method, path);
+  // APP_LOG(APP_LOG_LEVEL_INFO, "Making Spotify API call: %s %s", method, path);
   
   app_message_outbox_send();
 }
 
 static void refresh_now_playing(void) {
-  APP_LOG(APP_LOG_LEVEL_INFO, "refresh_now_playing called");
+  // APP_LOG(APP_LOG_LEVEL_INFO, "refresh_now_playing called");
   make_spotify_api_call("/me/player", "GET", NULL);
   
   // Restart the periodic refresh timer if now playing window is active
@@ -900,10 +940,14 @@ static void skip_to_previous(void) {
   app_timer_register(500, (AppTimerCallback)refresh_now_playing, NULL);
 }
 
-static void set_volume(int volume_percent) {
+static void set_volume(int volume_percent, ButtonId button) {
   char path[128];
   snprintf(path, sizeof(path), "/me/player/volume?volume_percent=%d", volume_percent);
-  APP_LOG(APP_LOG_LEVEL_INFO, "Setting volume to %d%%", volume_percent);
+  // APP_LOG(APP_LOG_LEVEL_INFO, "Setting volume to %d%%", volume_percent);
+  
+  // Store which button was pressed for error handling
+  s_app_data.volume_error_button = button;
+  
   make_spotify_api_call(path, "PUT", NULL);
 }
 
@@ -917,6 +961,37 @@ static int calculate_text_height(const char *text, GFont font, int width) {
   GSize text_size = graphics_text_layout_get_content_size(text, font, bounds, GTextOverflowModeWordWrap, GTextAlignmentCenter);
 
   return text_size.h + 5; // Add small padding
+}
+
+static void show_volume_error(ButtonId button) {
+  if (!s_app_data.action_bar_layer) {
+    return;
+  }
+  
+  APP_LOG(APP_LOG_LEVEL_INFO, "Showing volume error for button %d", button);
+  
+  // Set flag to prevent display updates from overriding error icon
+  s_app_data.showing_volume_error = true;
+  
+  // Show dismiss icon as error indicator
+  GBitmap *error_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_ICON_DISMISS);
+  if (error_bitmap) {
+    action_bar_layer_set_icon(s_app_data.action_bar_layer, button, error_bitmap);
+  } else {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "Failed to load dismiss icon for volume error");
+  }
+  
+  // Clear the error after 1 second
+  s_app_data.volume_error_timer = app_timer_register(1000, (AppTimerCallback)clear_volume_error, NULL);
+}
+
+static void clear_volume_error(void) {
+  // Clear the error flag
+  s_app_data.showing_volume_error = false;
+  
+  // Restore normal display
+  now_playing_update_display();
+  s_app_data.volume_error_timer = NULL;
 }
 
 static void update_clock(void) {
@@ -934,5 +1009,64 @@ static void update_clock(void) {
   
   // Restart timer for next update (every minute)
   s_app_data.clock_timer = app_timer_register(60000, (AppTimerCallback)update_clock, NULL);
+}
+
+static void request_volume_change(ButtonId button, int delta) {
+  // If there's already a volume change pending, accumulate the delta locally
+  if (s_app_data.volume_change_pending) {
+    s_app_data.pending_volume_delta += delta;
+    APP_LOG(APP_LOG_LEVEL_INFO, "Accumulating volume change: delta=%d, total=%d", delta, s_app_data.pending_volume_delta);
+    return;
+  }
+  
+  // Start a new volume change request
+  s_app_data.volume_change_pending = true;
+  s_app_data.pending_volume_button = button;
+  s_app_data.pending_volume_delta = delta;
+  
+  APP_LOG(APP_LOG_LEVEL_INFO, "Requesting volume change: button=%d, delta=%d", button, delta);
+  
+  // Only fetch current volume if we haven't fetched it recently (within last 2 seconds)
+  time_t current_time = time(NULL);
+  if (current_time - s_app_data.last_volume_fetch_time > 2) {
+    s_app_data.last_volume_fetch_time = current_time;
+    make_spotify_api_call("/me/player", "GET", NULL);
+  } else {
+    // Use current local volume and apply change immediately
+    APP_LOG(APP_LOG_LEVEL_INFO, "Using local volume (recent fetch), applying change immediately");
+    apply_volume_change();
+  }
+}
+
+static void apply_volume_change(void) {
+  if (!s_app_data.volume_change_pending) {
+    return;
+  }
+  
+  // Calculate new volume based on current API volume + accumulated delta
+  int new_volume = s_app_data.volume_percent + s_app_data.pending_volume_delta;
+  
+  // Clamp to valid range
+  if (new_volume < 0) new_volume = 0;
+  if (new_volume > 100) new_volume = 100;
+  
+  APP_LOG(APP_LOG_LEVEL_INFO, "Applying volume change: current=%d, delta=%d, new=%d", 
+          s_app_data.volume_percent, s_app_data.pending_volume_delta, new_volume);
+  
+  // Update local volume immediately for UI feedback
+  s_app_data.volume_percent = new_volume;
+  
+  // Update display immediately to show new volume
+  now_playing_update_display();
+  
+  // Send volume change to API
+  set_volume(new_volume, s_app_data.pending_volume_button);
+  
+  // Clear pending state
+  s_app_data.volume_change_pending = false;
+  s_app_data.pending_volume_delta = 0;
+  
+  // Refresh now playing data after volume change
+  app_timer_register(500, (AppTimerCallback)refresh_now_playing, NULL);
 }
 

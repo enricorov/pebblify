@@ -31,13 +31,13 @@ var MESSAGE_KEYS = {
 };
 
 function SpotifyAuth() {
-  console.log('SpotifyAuth constructor called');
+  // console.log('SpotifyAuth constructor called');
   this.accessToken = null;
   this.refreshToken = null;
   this.tokenExpiresAt = null;
   this.setupAppMessageHandlers();
   this.initSettingsPage();
-  console.log('SpotifyAuth constructor completed');
+  // console.log('SpotifyAuth constructor completed');
 }
 
 SpotifyAuth.prototype.setupAppMessageHandlers = function() {
@@ -45,34 +45,34 @@ SpotifyAuth.prototype.setupAppMessageHandlers = function() {
   // Handle authentication requests from C app
   Pebble.addEventListener('appmessage', function(e) {
     var message = e.payload;
-    console.log('Received message from C app:', message);
+    // console.log('Received message from C app:', message);
     
     // Check for AUTH_REQUEST (key 0)
     if (message[0] !== undefined) {
-      console.log('Received AUTH_REQUEST');
+      // console.log('Received AUTH_REQUEST');
       self.handleAuthRequest();
     }
     // Check for TOKEN_REFRESH (key 3)
     else if (message[3] !== undefined) {
-      console.log('Received TOKEN_REFRESH');
+      // console.log('Received TOKEN_REFRESH');
       self.refreshAccessToken();
     }
     // Check for API_CALL (key 4)
     else if (message[4] !== undefined) {
-      console.log('Received API_CALL');
+      // console.log('Received API_CALL');
       self.handleApiCall(message);
     }
     else {
-      console.log('Received unknown message type');
+      // console.log('Received unknown message type');
     }
   });
 };
 
 SpotifyAuth.prototype.initSettingsPage = function() {
-  console.log('initSettingsPage called');
+  // console.log('initSettingsPage called');
   var self = this;
   this.authUrl = this.getAuthorizationUrl();
-  console.log('Authorization URL:', this.authUrl);
+  // console.log('Authorization URL:', this.authUrl);
   
   // Use native Pebble Settings API
   Settings.config({
@@ -80,21 +80,21 @@ SpotifyAuth.prototype.initSettingsPage = function() {
     autosave: false,
     hash: true,
   }, function(e) {
-    console.log('opening configurable');
+    // console.log('opening configurable');
   }, function(e) {
-    console.log('Settings callback received:', e);
+    // console.log('Settings callback received:', e);
     if (e.options.hasOwnProperty('/?code')) {
       // user accepted authorization, code received
       var pkceCode = e.options['/?code'];
-      console.log('Authorization code received:', pkceCode);
+      // console.log('Authorization code received:', pkceCode);
       self.getToken(pkceCode);
     } else if (e.options.hasOwnProperty('/?error')) {
       // user closed authorization url
-      console.log('User closed Spotify authorize url');
+      // console.log('User closed Spotify authorize url');
     }
     if (e.failed) {
-      console.log('PARSING FAILED - Response:');
-      console.log(e.response);
+      // console.log('PARSING FAILED - Response:');
+      // console.log(e.response);
     }
   });
 };
@@ -115,19 +115,19 @@ SpotifyAuth.prototype.getAuthorizationUrl = function() {
 };
 
 SpotifyAuth.prototype.getToken = function(pkceCode) {
-  console.log('getToken called with code:', pkceCode);
+  // console.log('getToken called with code:', pkceCode);
   var self = this;
   var codeVerifier = localStorage.getItem('pkceCodeVerifier');
-  console.log('Using code verifier:', codeVerifier);
+  // console.log('Using code verifier:', codeVerifier);
   var body = 'client_id=' + CLIENT_ID + '&redirect_uri=' + encodeURIComponent(PEBBLE_REDIRECT_URI) + '&code_verifier=' + codeVerifier + '&code=' + pkceCode + '&grant_type=authorization_code';
 
-  console.log('Making token request to:', ACCOUNTS_BASE_URL + '/api/token');
+  // console.log('Making token request to:', ACCOUNTS_BASE_URL + '/api/token');
   axios.post(ACCOUNTS_BASE_URL + '/api/token', body, {
     headers: {
       'content-type': 'application/x-www-form-urlencoded',
     },
   }).then(function(response) {
-    console.log('Token response received:', response.data);
+    // console.log('Token response received:', response.data);
     var userTokens = response.data;
     userTokens.expiration_date = Date.now() + userTokens.expires_in * 1000;
 
@@ -136,10 +136,10 @@ SpotifyAuth.prototype.getToken = function(pkceCode) {
     self.refreshToken = userTokens.refresh_token;
     self.tokenExpiresAt = userTokens.expiration_date;
     
-    console.log('Tokens stored, calling sendAuthSuccess');
+    // console.log('Tokens stored, calling sendAuthSuccess');
     self.sendAuthSuccess();
   }).catch(function(data) {
-    console.log('Token request failed:', data);
+    // console.log('Token request failed:', data);
     if (data.error == 'invalid_grant') {
       // Authorization code expired
       console.log('User must relaunch Pebblify settings app');
@@ -204,10 +204,10 @@ SpotifyAuth.prototype.refreshAccessToken = function() {
 };
 
 SpotifyAuth.prototype.handleApiCall = function(message) {
-  console.log('handleApiCall called with message:', message);
+  // console.log('handleApiCall called with message:', message);
   var self = this;
   if (!this.accessToken) {
-    console.log('No access token available');
+    // console.log('No access token available');
     this.sendApiError('No access token available');
     return;
   }
@@ -217,7 +217,7 @@ SpotifyAuth.prototype.handleApiCall = function(message) {
   var httpMethod = message[11] || message.http_method || 'GET';
   var data = message[12] || message.data || {};
   
-  console.log('Making API call:', httpMethod, API_BASE_URL + apiPath);
+  // console.log('Making API call:', httpMethod, API_BASE_URL + apiPath);
   
   axios({
     url: API_BASE_URL + apiPath,
@@ -228,7 +228,7 @@ SpotifyAuth.prototype.handleApiCall = function(message) {
     },
     data: data
   }).then(function(response) {
-    console.log('API call successful:', response.data);
+    // console.log('API call successful:', response.data);
     self.sendParsedNowPlayingData(response.data);
   }).catch(function(error) {
     console.error('API call failed:', error);
@@ -271,10 +271,10 @@ SpotifyAuth.prototype.pkceChallengeFromVerifier = function(verifier) {
 
 // Message sending functions
 SpotifyAuth.prototype.sendAuthSuccess = function() {
-  console.log('sendAuthSuccess called');
-  console.log('Access token:', this.accessToken);
-  console.log('Refresh token:', this.refreshToken);
-  console.log('Token expires at:', this.tokenExpiresAt);
+  // console.log('sendAuthSuccess called');
+  // console.log('Access token:', this.accessToken);
+  // console.log('Refresh token:', this.refreshToken);
+  // console.log('Token expires at:', this.tokenExpiresAt);
   
   Pebble.sendAppMessage({
     1: 1, // AUTH_SUCCESS key
@@ -283,7 +283,7 @@ SpotifyAuth.prototype.sendAuthSuccess = function() {
     9: this.tokenExpiresAt // EXPIRES_AT key
   });
   
-  console.log('Auth success message sent to C app');
+  // console.log('Auth success message sent to C app');
 };
 
 SpotifyAuth.prototype.sendAuthError = function(error) {
@@ -301,7 +301,7 @@ SpotifyAuth.prototype.sendApiResponse = function(data) {
 };
 
 SpotifyAuth.prototype.sendParsedNowPlayingData = function(data) {
-  console.log('Parsing now playing data:', data);
+  // console.log('Parsing now playing data:', data);
   
   // Parse the Spotify API response
   var trackName = '';
@@ -320,12 +320,12 @@ SpotifyAuth.prototype.sendParsedNowPlayingData = function(data) {
   
   if (data) {
     isPlaying = data.is_playing || false;
-    console.log('Device data:', data.device);
+    // console.log('Device data:', data.device);
     if (data.device && data.device.volume_percent !== undefined) {
       volumePercent = data.device.volume_percent;
-      console.log('Volume from API:', data.device.volume_percent, 'Type:', typeof data.device.volume_percent);
+      // console.log('Volume from API:', data.device.volume_percent, 'Type:', typeof data.device.volume_percent);
     } else {
-      console.log('No device volume_percent found, using default:', volumePercent);
+      // console.log('No device volume_percent found, using default:', volumePercent);
     }
     if (data.actions && data.actions.disallows) {
       canSkipPrev = !data.actions.disallows.skipping_prev;
@@ -333,14 +333,14 @@ SpotifyAuth.prototype.sendParsedNowPlayingData = function(data) {
     }
   }
   
-  console.log('Parsed data:', {
-    trackName: trackName,
-    artistName: artistName,
-    isPlaying: isPlaying,
-    volumePercent: volumePercent,
-    canSkipPrev: canSkipPrev,
-    canSkipNext: canSkipNext
-  });
+  // console.log('Parsed data:', {
+  //   trackName: trackName,
+  //   artistName: artistName,
+  //   isPlaying: isPlaying,
+  //   volumePercent: volumePercent,
+  //   canSkipPrev: canSkipPrev,
+  //   canSkipNext: canSkipNext
+  // });
   
   var messageToSend = {
     5: 1, // API_RESPONSE key
@@ -352,8 +352,8 @@ SpotifyAuth.prototype.sendParsedNowPlayingData = function(data) {
     20: canSkipNext ? 1 : 0 // CAN_SKIP_NEXT key
   };
   
-  console.log('Sending message to C app:', messageToSend);
-  console.log('Volume value being sent:', volumePercent, 'Type:', typeof volumePercent);
+  // console.log('Sending message to C app:', messageToSend);
+  // console.log('Volume value being sent:', volumePercent, 'Type:', typeof volumePercent);
   
   // Send parsed data to C app
   Pebble.sendAppMessage(messageToSend);
@@ -383,8 +383,8 @@ SpotifyAuth.prototype.loadStoredTokens = function() {
 
 // Initialize authentication when app starts
 Pebble.addEventListener('ready', function() {
-  console.log('Pebble ready event fired');
+  // console.log('Pebble ready event fired');
   var auth = new SpotifyAuth();
   auth.loadStoredTokens();
-  console.log('Auth initialized');
+  // console.log('Auth initialized');
 });

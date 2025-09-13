@@ -25,7 +25,11 @@ pebble build
 pebble clean
 
 # Install the app on specific emulator
-pebble install --emulator basalt
+# pebble install --emulator basalt
+
+# Install the app on specific emulator, and watch the logs
+pebble install --phone 192.168.0.209 --logs
+
 
 # Screenshot the running emulator
 pebble screenshot --no-open screenshot.png
@@ -79,7 +83,7 @@ Key Entry Points:
 
 ## Development Best Practices
 
-- Whenever making changes, run `pebble screenshot` and view the screenshot to make sure it's what the user requested. If not, make more changes until it does what it's supposed to.
+- Whenever making changes, run `pebble install --phone 192.168.0..209 --logs and ask the user if they're  happy with the changes.
 
 ## AI Interaction Guidelines
 
