@@ -1,6 +1,11 @@
 #include "now_playing.h"
 #include "../api/spotify_api.h"
 
+// Volume control settings
+// Change this value to adjust volume step size (1-100)
+// Higher values = bigger volume jumps per button press
+#define VOLUME_STEP_SIZE 3  // Volume change per button press (1-100)
+
 // Now playing UI elements
 static TextLayer *s_track_layer;
 static TextLayer *s_artist_layer;
@@ -243,7 +248,7 @@ void now_playing_handle_action(ButtonId button) {
   switch (button) {
     case BUTTON_ID_UP:
       // Volume up
-      now_playing_request_volume_change(BUTTON_ID_UP, 3);
+      now_playing_request_volume_change(BUTTON_ID_UP, VOLUME_STEP_SIZE);
       break;
     case BUTTON_ID_SELECT:
       // Play/pause
@@ -252,7 +257,7 @@ void now_playing_handle_action(ButtonId button) {
       break;
     case BUTTON_ID_DOWN:
       // Volume down
-      now_playing_request_volume_change(BUTTON_ID_DOWN, -3);
+      now_playing_request_volume_change(BUTTON_ID_DOWN, -VOLUME_STEP_SIZE);
       break;
     default:
       break;
