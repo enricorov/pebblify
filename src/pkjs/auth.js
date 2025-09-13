@@ -35,6 +35,15 @@ function SpotifyAuth() {
   this.accessToken = null;
   this.refreshToken = null;
   this.tokenExpiresAt = null;
+  
+  // Volume control state
+  this.pendingVolumeChange = null;
+  this.volumeChangeTimer = null;
+  this.currentVolume = null; // Will be set from API
+  this.localVolume = null; // Local volume tracker (independent of API responses)
+  this.lastVolumeApiCall = 0; // Timestamp of last volume API call
+  this.lastVolumeChange = 0; // Timestamp of last volume change we made
+  
   this.setupAppMessageHandlers();
   this.initSettingsPage();
   this.loadStoredTokens(); // Load tokens from localStorage on startup
@@ -221,6 +230,12 @@ SpotifyAuth.prototype.handleApiCall = function(message) {
   var httpMethod = message[11] || message.http_method || 'GET';
   var data = message[12] || message.data || {};
   
+  // Check if this is a volume change request
+  if (apiPath && apiPath.includes('/me/player/volume')) {
+    self.handleVolumeChange(apiPath, httpMethod);
+    return;
+  }
+  
   // console.log('Making API call:', httpMethod, API_BASE_URL + apiPath);
   
   axios({
@@ -247,6 +262,171 @@ SpotifyAuth.prototype.handleApiCall = function(message) {
     } else {
       self.sendApiError(error.message);
     }
+  });
+};
+
+// Volume control with accumulation
+SpotifyAuth.prototype.handleVolumeChange = function(apiPath, httpMethod) {
+  var self = this;
+  
+  // Extract volume percentage from the API path
+  var volumeMatch = apiPath.match(/volume_percent=(\d+)/);
+  if (!volumeMatch) {
+    console.error('Could not extract volume from path:', apiPath);
+    this.sendApiError('Invalid volume request');
+    return;
+  }
+  
+  var targetVolume = parseInt(volumeMatch[1]);
+  
+  // If we don't know the current volume, get it from API first
+  if (this.localVolume === null) {
+    console.log('Unknown volume, fetching from API first');
+    this.getCurrentVolumeFromAPI(function(currentVolume) {
+      self.localVolume = currentVolume;
+      self.handleVolumeChangeRequest(targetVolume);
+    });
+    return;
+  }
+  
+  this.handleVolumeChangeRequest(targetVolume);
+};
+
+SpotifyAuth.prototype.getCurrentVolumeFromAPI = function(callback) {
+  var self = this;
+  console.log('Fetching current volume from API');
+  
+  axios.get(API_BASE_URL + '/me/player', {
+    headers: {
+      'Authorization': 'Bearer ' + this.accessToken,
+      'Content-Type': 'application/json'
+    }
+  }).then(function(response) {
+    try {
+      var data = JSON.parse(response);
+      if (data && data.device && data.device.volume_percent !== undefined) {
+        var volume = data.device.volume_percent;
+        console.log('Got current volume from API:', volume);
+        callback(volume);
+      } else {
+        console.log('No volume data in API response, using default 50');
+        callback(50);
+      }
+    } catch (e) {
+      console.error('Failed to parse volume API response:', e);
+      callback(50);
+    }
+  }).catch(function(error) {
+    console.error('Failed to get current volume:', error);
+    callback(50);
+  });
+};
+
+SpotifyAuth.prototype.handleVolumeChangeRequest = function(targetVolume) {
+  var self = this;
+  
+  console.log('Volume change request: local=' + this.localVolume + ', target=' + targetVolume);
+  
+  // If there's already a pending volume change, accumulate it
+  if (this.pendingVolumeChange) {
+    console.log('Accumulating volume change: existing target=' + this.pendingVolumeChange.targetVolume + ', new target=' + targetVolume);
+    
+    // Cancel the existing timer
+    if (this.volumeChangeTimer) {
+      clearTimeout(this.volumeChangeTimer);
+    }
+    
+    // Calculate the total delta from the original volume (when the first press happened)
+    var totalDelta = targetVolume - this.pendingVolumeChange.originalVolume;
+    var newTargetVolume = this.pendingVolumeChange.originalVolume + totalDelta;
+    
+    // Clamp to valid range
+    if (newTargetVolume < 0) newTargetVolume = 0;
+    if (newTargetVolume > 100) newTargetVolume = 100;
+    
+    this.pendingVolumeChange.targetVolume = newTargetVolume;
+    this.pendingVolumeChange.volumeDelta = totalDelta; // This delta is now the total delta from original
+    
+    console.log('Accumulated volume change: total delta=' + totalDelta + ', final target=' + newTargetVolume);
+  } else {
+    // Start a new volume change
+    var delta = targetVolume - this.localVolume; // Initial delta from current local volume
+    this.pendingVolumeChange = {
+      targetVolume: targetVolume,
+      originalVolume: this.localVolume, // Store current volume as original
+      volumeDelta: delta
+    };
+    console.log('Starting new volume change: delta=' + delta);
+  }
+  
+  this.volumeChangeTimer = setTimeout(function() {
+    self.executeVolumeChange();
+  }, 150); // 150ms delay to allow for rapid presses
+};
+
+SpotifyAuth.prototype.executeVolumeChange = function() {
+  var self = this;
+  
+  if (!this.pendingVolumeChange) {
+    return;
+  }
+  
+  var targetVolume = this.pendingVolumeChange.targetVolume;
+  var volumeDelta = this.pendingVolumeChange.volumeDelta;
+  var currentTime = Date.now();
+  
+  console.log('Executing volume change: target=' + targetVolume + ', delta=' + volumeDelta);
+  
+  // Check rate limit - only allow API calls every 300ms
+  if (currentTime - this.lastVolumeApiCall < 300) {
+    var waitTime = 300 - (currentTime - this.lastVolumeApiCall);
+    console.log('Rate limiting: waiting ' + waitTime + 'ms before API call');
+    
+    // Reschedule the execution after the rate limit period
+    setTimeout(function() {
+      self.executeVolumeChange();
+    }, waitTime);
+    return;
+  }
+  
+  // Update our local volume tracker immediately
+  this.localVolume = targetVolume;
+  
+  // Record the API call timestamp and volume change timestamp
+  this.lastVolumeApiCall = currentTime;
+  this.lastVolumeChange = currentTime;
+  
+  // Make the API call
+  axios.put(API_BASE_URL + '/me/player/volume?volume_percent=' + targetVolume, null, {
+    headers: {
+      'Authorization': 'Bearer ' + this.accessToken,
+      'Content-Type': 'application/json'
+    }
+  }).then(function(response) {
+    console.log('Volume change successful: ' + targetVolume + '%');
+    
+    // Update our current volume (for API responses)
+    self.currentVolume = targetVolume;
+    
+    // Clear pending change
+    self.pendingVolumeChange = null;
+    self.volumeChangeTimer = null;
+    
+    // Send success response back to C app
+    self.sendParsedNowPlayingData({
+      device: {
+        volume_percent: targetVolume
+      }
+    });
+  }).catch(function(error) {
+    console.error('Volume change failed:', error);
+    
+    // Clear pending change
+    self.pendingVolumeChange = null;
+    self.volumeChangeTimer = null;
+    
+    // Send error back to C app
+    self.sendApiError('Volume change failed: ' + error.message);
   });
 };
 
@@ -327,6 +507,23 @@ SpotifyAuth.prototype.sendParsedNowPlayingData = function(data) {
     // console.log('Device data:', data.device);
     if (data.device && data.device.volume_percent !== undefined) {
       volumePercent = data.device.volume_percent;
+      
+      // Check if this API response is stale (came too soon after our volume change)
+      var currentTime = Date.now();
+      var timeSinceLastChange = currentTime - this.lastVolumeChange;
+      
+      console.log('API volume check: API=' + volumePercent + ', local=' + this.localVolume + ', timeSince=' + timeSinceLastChange + 'ms');
+      
+      if (timeSinceLastChange < 2000) { // 2 seconds grace period
+        console.log('Ignoring stale API volume update:', volumePercent, '(local:', this.localVolume + ')');
+        // Use our local volume instead
+        volumePercent = this.localVolume;
+      } else {
+        // Update local volume from API - this ensures we stay in sync
+        this.currentVolume = volumePercent;
+        this.localVolume = volumePercent;
+        console.log('Updated volume from API:', volumePercent);
+      }
       // console.log('Volume from API:', data.device.volume_percent, 'Type:', typeof data.device.volume_percent);
     } else {
       // console.log('No device volume_percent found, using default:', volumePercent);
