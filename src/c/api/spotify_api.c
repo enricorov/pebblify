@@ -88,15 +88,15 @@ void spotify_api_handle_response(DictionaryIterator *iter) {
   Tuple *can_skip_prev_tuple = dict_find(iter, 19); // CAN_SKIP_PREV key
   Tuple *can_skip_next_tuple = dict_find(iter, 20); // CAN_SKIP_NEXT key
   
-  // Update track name
-  if (track_name_tuple) {
+  // Update track name only if provided (preserve existing data if not)
+  if (track_name_tuple && track_name_tuple->value->cstring && strlen(track_name_tuple->value->cstring) > 0) {
     strncpy(s_app_data.track_name, track_name_tuple->value->cstring, sizeof(s_app_data.track_name) - 1);
     s_app_data.track_name[sizeof(s_app_data.track_name) - 1] = '\0';
     // APP_LOG(APP_LOG_LEVEL_INFO, "Track name: %s", s_app_data.track_name);
   }
   
-  // Update artist name
-  if (artist_name_tuple) {
+  // Update artist name only if provided (preserve existing data if not)
+  if (artist_name_tuple && artist_name_tuple->value->cstring && strlen(artist_name_tuple->value->cstring) > 0) {
     strncpy(s_app_data.artist_name, artist_name_tuple->value->cstring, sizeof(s_app_data.artist_name) - 1);
     s_app_data.artist_name[sizeof(s_app_data.artist_name) - 1] = '\0';
     // APP_LOG(APP_LOG_LEVEL_INFO, "Artist name: %s", s_app_data.artist_name);

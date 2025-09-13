@@ -203,7 +203,7 @@ void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *context
   }
   
   // Restore original icons after a short delay to show the action was performed
-  app_timer_register(500, (AppTimerCallback)now_playing_update_display, NULL);
+  app_timer_register(700, (AppTimerCallback)now_playing_update_display, NULL);
 }
 
 void now_playing_click_config_provider(void *context) {
@@ -243,17 +243,16 @@ void now_playing_handle_action(ButtonId button) {
   switch (button) {
     case BUTTON_ID_UP:
       // Volume up
-      now_playing_request_volume_change(BUTTON_ID_UP, 5);
+      now_playing_request_volume_change(BUTTON_ID_UP, 3);
       break;
     case BUTTON_ID_SELECT:
       // Play/pause
       spotify_api_play_pause_track();
-      // Ensure icons are updated after play/pause state change
-      now_playing_update_display();
+      // Don't update display immediately - let the API response handle it
       break;
     case BUTTON_ID_DOWN:
       // Volume down
-      now_playing_request_volume_change(BUTTON_ID_DOWN, -5);
+      now_playing_request_volume_change(BUTTON_ID_DOWN, -3);
       break;
     default:
       break;
@@ -341,8 +340,9 @@ void now_playing_update_display(void) {
     } else {
       // New simplified behavior: Volume Up, Play/Pause, Volume Down (no animation on set)
       GBitmap *vol_up_bitmap = app_state_get_cached_bitmap(&s_app_data.cached_vol_up_bitmap, RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_UP);
-      GBitmap *play_pause_bitmap = app_state_get_cached_bitmap(&s_app_data.cached_pause_bitmap, s_app_data.is_playing ? 
-        RESOURCE_ID_IMAGE_MUSIC_ICON_PAUSE : RESOURCE_ID_IMAGE_MUSIC_ICON_PLAY);
+      GBitmap *play_pause_bitmap = app_state_get_cached_bitmap(
+        s_app_data.is_playing ? &s_app_data.cached_pause_bitmap : &s_app_data.cached_play_bitmap, 
+        s_app_data.is_playing ? RESOURCE_ID_IMAGE_MUSIC_ICON_PAUSE : RESOURCE_ID_IMAGE_MUSIC_ICON_PLAY);
       GBitmap *vol_down_bitmap = app_state_get_cached_bitmap(&s_app_data.cached_vol_down_bitmap, RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_DOWN);
       
       if (vol_up_bitmap) action_bar_layer_set_icon(s_action_bar_layer, BUTTON_ID_UP, vol_up_bitmap);
