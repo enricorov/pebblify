@@ -83,6 +83,10 @@ Key Entry Points:
 
 - When given an image of a watchface to replicate, describe the target watchface in precise detail. Note every visual element present, as well as size, alignment, font weight, spacing, and location.
 
+## AI pebble command Guideline
+
+When running commands, do not EVER terminate the command with CTRL+C / SIGINT. I will manually terminate it if needed
+
 ## AI Code Review Guidelines
 
 - Once you think you've fulfilled the user's request, ask yourself if you see any issues in the    logs.
