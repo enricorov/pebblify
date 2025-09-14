@@ -1,0 +1,144 @@
+#ifndef CONSTANTS_H
+#define CONSTANTS_H
+
+#include <pebble.h>
+
+// ============================================================================
+// Buffer Sizes
+// ============================================================================
+#define ACCESS_TOKEN_SIZE 512
+#define REFRESH_TOKEN_SIZE 512
+#define AUTH_ERROR_SIZE 128
+#define TRACK_NAME_SIZE 128
+#define ARTIST_NAME_SIZE 128
+#define API_PATH_SIZE 128
+#define CLOCK_TEXT_SIZE 16
+#define TEMP_BUFFER_SIZE 256
+
+// ============================================================================
+// Timer Intervals (in milliseconds)
+// ============================================================================
+#define REFRESH_INTERVAL_MS 10000        // Now playing refresh interval
+#define CLOCK_UPDATE_INTERVAL_MS 60000   // Clock update interval
+#define VOLUME_FETCH_INTERVAL_MS 2000    // Volume fetch cooldown
+#define VOLUME_ERROR_DISPLAY_MS 1000     // Volume error display duration
+#define ACTION_FEEDBACK_DELAY_MS 700     // Action feedback delay
+#define API_RETRY_DELAY_MS 500           // API retry delay
+#define VOLUME_CHANGE_DELAY_MS 150       // Volume change accumulation delay
+#define VOLUME_RATE_LIMIT_MS 300         // Volume API rate limit
+#define VOLUME_STALE_GRACE_MS 2000       // Volume stale data grace period
+
+// ============================================================================
+// UI Dimensions and Layout
+// ============================================================================
+#define MARGIN_SMALL 5
+#define MARGIN_MEDIUM 10
+#define MARGIN_LARGE 20
+#define TITLE_HEIGHT 30
+#define SUBTITLE_HEIGHT 40
+#define INSTRUCTION_HEIGHT 60
+#define CLOCK_HEIGHT 25
+#define MIN_TRACK_HEIGHT 30
+#define MIN_ARTIST_HEIGHT 25
+#define TEXT_PADDING 5
+#define MAX_TEXT_HEIGHT 200
+#define RESERVE_SPACE_HEIGHT 80
+
+// ============================================================================
+// Volume Control
+// ============================================================================
+#define VOLUME_STEP_SIZE 3               // Volume change per button press
+#define VOLUME_MIN 0                    // Minimum volume
+#define VOLUME_MAX 100                  // Maximum volume
+#define VOLUME_DEFAULT 50               // Default volume
+#define VOLUME_SUSPICIOUS_THRESHOLD 15  // Threshold for suspicious volume jumps
+#define VOLUME_PENDING_THRESHOLD 10     // Threshold during pending changes
+
+// ============================================================================
+// AppMessage Keys
+// ============================================================================
+#define MSG_KEY_AUTH_REQUEST 0
+#define MSG_KEY_AUTH_SUCCESS 1
+#define MSG_KEY_AUTH_ERROR 2
+#define MSG_KEY_TOKEN_REFRESH 3
+#define MSG_KEY_API_CALL 4
+#define MSG_KEY_API_RESPONSE 5
+#define MSG_KEY_API_ERROR 6
+#define MSG_KEY_ACCESS_TOKEN 7
+#define MSG_KEY_REFRESH_TOKEN 8
+#define MSG_KEY_EXPIRES_AT 9
+#define MSG_KEY_API_PATH 10
+#define MSG_KEY_HTTP_METHOD 11
+#define MSG_KEY_API_DATA 12
+#define MSG_KEY_ERROR_MESSAGE 13
+#define MSG_KEY_RESPONSE_DATA 14
+#define MSG_KEY_TRACK_NAME 15
+#define MSG_KEY_ARTIST_NAME 16
+#define MSG_KEY_IS_PLAYING 17
+#define MSG_KEY_VOLUME_PERCENT 18
+#define MSG_KEY_CAN_SKIP_PREV 19
+#define MSG_KEY_CAN_SKIP_NEXT 20
+
+// ============================================================================
+// Persistent Storage Keys
+// ============================================================================
+#define PERSIST_KEY_ACCESS_TOKEN 1
+#define PERSIST_KEY_REFRESH_TOKEN 2
+#define PERSIST_KEY_TOKEN_EXPIRES_AT 3
+#define PERSIST_KEY_IS_AUTHENTICATED 4
+
+// ============================================================================
+// AppMessage Buffer Sizes
+// ============================================================================
+#define INBOX_SIZE 1024
+#define OUTBOX_SIZE 1024
+
+// ============================================================================
+// Menu Configuration
+// ============================================================================
+#define MAIN_MENU_SECTIONS 3
+#define HOME_MENU_ROWS 3
+#define LIBRARY_MENU_ROWS 3
+#define DEVICES_MENU_ROWS 1
+
+// ============================================================================
+// Long Click Duration
+// ============================================================================
+#define LONG_CLICK_DURATION_MS 300
+
+// ============================================================================
+// Default Text Strings
+// ============================================================================
+#define DEFAULT_NO_SESSION_TEXT "No active session"
+#define DEFAULT_NO_ACTIVE_SESSION_TEXT "No Active Session"
+#define DEFAULT_START_MUSIC_TEXT "Start playing music on Spotify"
+#define DEFAULT_NEXT_TRACK_TEXT "Next Track"
+#define DEFAULT_PREV_TRACK_TEXT "Previous Track"
+#define DEFAULT_AUTH_EXPIRED_TEXT "Authentication expired"
+#define DEFAULT_REAUTH_TEXT "Please re-authenticate"
+#define DEFAULT_NO_DEVICE_TEXT "No Active Device"
+#define DEFAULT_CONNECTION_ERROR_TEXT "Connection error"
+#define DEFAULT_CHECK_CONNECTION_TEXT "Check your internet connection"
+#define DEFAULT_APP_NAME "Pebblify"
+#define DEFAULT_CONNECT_TEXT "Connect to Spotify"
+#define DEFAULT_AUTH_INSTRUCTION_TEXT "Press SELECT to authorize\nwith Spotify"
+
+// ============================================================================
+// Font Keys
+// ============================================================================
+#define FONT_KEY_TITLE FONT_KEY_GOTHIC_18_BOLD
+#define FONT_KEY_SUBTITLE FONT_KEY_GOTHIC_14
+#define FONT_KEY_TRACK FONT_KEY_GOTHIC_24_BOLD
+#define FONT_KEY_ARTIST FONT_KEY_GOTHIC_18_BOLD
+#define FONT_KEY_CLOCK FONT_KEY_GOTHIC_18_BOLD
+
+// ============================================================================
+// Color Themes (using compile-time macros)
+// ============================================================================
+#define BACKGROUND_COLOR PBL_IF_COLOR_ELSE(GColorBlack, GColorWhite)
+#define FOREGROUND_COLOR PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack)
+#define SECONDARY_COLOR PBL_IF_COLOR_ELSE(GColorLightGray, GColorDarkGray)
+#define AUTH_BACKGROUND_COLOR PBL_IF_COLOR_ELSE(GColorJaegerGreen, GColorBlack)
+
+#endif // CONSTANTS_H
+

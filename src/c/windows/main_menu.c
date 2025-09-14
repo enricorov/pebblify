@@ -1,6 +1,7 @@
 #include "main_menu.h"
 #include "now_playing.h"
 #include "../core/app_state.h"
+#include "../core/constants.h"
 
 // Forward declarations
 extern void now_playing_window_create(void);
@@ -62,14 +63,14 @@ void main_menu_unload(Window *window) {
 }
 
 uint16_t main_menu_get_num_sections_callback(MenuLayer *menu_layer, void *data) {
-  return 3; // Home, Library, Devices
+  return MAIN_MENU_SECTIONS; // Home, Library, Devices
 }
 
 uint16_t main_menu_get_num_rows_callback(MenuLayer *menu_layer, uint16_t section_index, void *data) {
   switch (section_index) {
-    case 0: return 3; // Home: Now playing, Jump back in, Made for you
-    case 1: return 3; // Library: Playlists, Albums, Artists
-    case 2: return 1; // Devices: Play on device
+    case 0: return HOME_MENU_ROWS; // Home: Now playing, Jump back in, Made for you
+    case 1: return LIBRARY_MENU_ROWS; // Library: Playlists, Albums, Artists
+    case 2: return DEVICES_MENU_ROWS; // Devices: Play on device
     default: return 0;
   }
 }

@@ -1,11 +1,7 @@
 #include "now_playing.h"
 #include "../api/spotify_api.h"
 #include "../core/app_state.h"
-
-// Volume control settings
-// Change this value to adjust volume step size (1-100)
-// Higher values = bigger volume jumps per button press
-#define VOLUME_STEP_SIZE 3  // Volume change per button press (1-100)
+#include "../core/constants.h"
 
 // Now playing UI elements
 static TextLayer *s_track_layer;
@@ -18,12 +14,12 @@ static AppTimer *s_clock_timer;
 void now_playing_init(void) {
   // Initialize now playing data
   s_app_data.is_active_session = false;
-  strncpy(s_app_data.track_name, "No active session", sizeof(s_app_data.track_name) - 1);
+  strncpy(s_app_data.track_name, DEFAULT_NO_SESSION_TEXT, sizeof(s_app_data.track_name) - 1);
   s_app_data.track_name[sizeof(s_app_data.track_name) - 1] = '\0';
   strncpy(s_app_data.artist_name, "", sizeof(s_app_data.artist_name) - 1);
   s_app_data.artist_name[sizeof(s_app_data.artist_name) - 1] = '\0';
   s_app_data.is_playing = false;
-  s_app_data.volume_percent = 50;
+  s_app_data.volume_percent = VOLUME_DEFAULT;
   s_app_data.can_skip_prev = true;
   s_app_data.can_skip_next = true;
 }
@@ -95,9 +91,9 @@ void now_playing_window_load(Window *window) {
   action_bar_layer_set_click_config_provider(s_action_bar_layer, now_playing_click_config_provider);
   
   // Create clock text layer at the bottom
-  s_clock_layer = text_layer_create(GRect(10, bounds.size.h - 30, bounds.size.w - ACTION_BAR_WIDTH - 20, 25));
+  s_clock_layer = text_layer_create(GRect(MARGIN_MEDIUM, bounds.size.h - CLOCK_HEIGHT - MARGIN_SMALL, bounds.size.w - ACTION_BAR_WIDTH - MARGIN_LARGE, CLOCK_HEIGHT));
   text_layer_set_text_alignment(s_clock_layer, GTextAlignmentCenter);
-  text_layer_set_font(s_clock_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
+  text_layer_set_font(s_clock_layer, fonts_get_system_font(FONT_KEY_CLOCK));
   text_layer_set_text_color(s_clock_layer, PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack));
   text_layer_set_background_color(s_clock_layer, GColorClear);
   layer_add_child(window_layer, text_layer_get_layer(s_clock_layer));
@@ -110,18 +106,18 @@ void now_playing_window_load(Window *window) {
   action_bar_layer_add_to_window(s_action_bar_layer, window);
   
   // Create text layers for track info (ActionBarLayer takes up right side)
-  GFont track_font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
-  GFont artist_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  GFont track_font = fonts_get_system_font(FONT_KEY_TRACK);
+  GFont artist_font = fonts_get_system_font(FONT_KEY_ARTIST);
   
   // Calculate dynamic heights based on text content
-  int track_height = now_playing_calculate_text_height(s_app_data.track_name, track_font, bounds.size.w - ACTION_BAR_WIDTH - 20);
-  int artist_height = now_playing_calculate_text_height(s_app_data.artist_name, artist_font, bounds.size.w - ACTION_BAR_WIDTH - 20);
+  int track_height = now_playing_calculate_text_height(s_app_data.track_name, track_font, bounds.size.w - ACTION_BAR_WIDTH - MARGIN_LARGE);
+  int artist_height = now_playing_calculate_text_height(s_app_data.artist_name, artist_font, bounds.size.w - ACTION_BAR_WIDTH - MARGIN_LARGE);
   
   // Ensure minimum heights
-  if (track_height < 30) track_height = 30;
-  if (artist_height < 25) artist_height = 25;
+  if (track_height < MIN_TRACK_HEIGHT) track_height = MIN_TRACK_HEIGHT;
+  if (artist_height < MIN_ARTIST_HEIGHT) artist_height = MIN_ARTIST_HEIGHT;
   
-  s_track_layer = text_layer_create(GRect(10, 5, bounds.size.w - ACTION_BAR_WIDTH - 20, track_height));
+  s_track_layer = text_layer_create(GRect(MARGIN_MEDIUM, MARGIN_SMALL, bounds.size.w - ACTION_BAR_WIDTH - MARGIN_LARGE, track_height));
   text_layer_set_text_alignment(s_track_layer, GTextAlignmentCenter);
   text_layer_set_font(s_track_layer, track_font);
   text_layer_set_text_color(s_track_layer, PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack));
@@ -129,7 +125,7 @@ void now_playing_window_load(Window *window) {
   text_layer_set_overflow_mode(s_track_layer, GTextOverflowModeWordWrap);
   layer_add_child(window_layer, text_layer_get_layer(s_track_layer));
   
-  s_artist_layer = text_layer_create(GRect(10, 10 + track_height, bounds.size.w - ACTION_BAR_WIDTH - 20, artist_height));
+  s_artist_layer = text_layer_create(GRect(MARGIN_MEDIUM, MARGIN_MEDIUM + track_height, bounds.size.w - ACTION_BAR_WIDTH - MARGIN_LARGE, artist_height));
   text_layer_set_text_alignment(s_artist_layer, GTextAlignmentCenter);
   text_layer_set_font(s_artist_layer, artist_font);
   text_layer_set_text_color(s_artist_layer, PBL_IF_COLOR_ELSE(GColorLightGray, GColorDarkGray));
@@ -156,7 +152,7 @@ void now_playing_window_load(Window *window) {
     }
     
     // Set up periodic refresh every 10 seconds
-    s_refresh_timer = app_timer_register(10000, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
+    s_refresh_timer = app_timer_register(REFRESH_INTERVAL_MS, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
   }
 }
 
@@ -248,7 +244,7 @@ void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *context
   
   // Restore original icons after a short delay to show the action was performed
   // Note: This is a one-shot timer that will clean itself up
-  app_timer_register(700, (AppTimerCallback)now_playing_update_display, NULL);
+  app_timer_register(ACTION_FEEDBACK_DELAY_MS, (AppTimerCallback)now_playing_update_display, NULL);
 }
 
 void now_playing_click_config_provider(void *context) {
@@ -258,8 +254,8 @@ void now_playing_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_DOWN, now_playing_click_handler);
   
   // Long clicks for track navigation
-  window_long_click_subscribe(BUTTON_ID_UP, 300, now_playing_long_click_handler, NULL);
-  window_long_click_subscribe(BUTTON_ID_DOWN, 300, now_playing_long_click_handler, NULL);
+  window_long_click_subscribe(BUTTON_ID_UP, LONG_CLICK_DURATION_MS, now_playing_long_click_handler, NULL);
+  window_long_click_subscribe(BUTTON_ID_DOWN, LONG_CLICK_DURATION_MS, now_playing_long_click_handler, NULL);
 }
 
 void now_playing_click_handler(ClickRecognizerRef recognizer, void *context) {
@@ -272,9 +268,9 @@ void now_playing_click_handler(ClickRecognizerRef recognizer, void *context) {
 void now_playing_handle_action(ButtonId button) {
   if (!s_app_data.is_active_session) {
     // Show helpful message when no active session
-    strncpy(s_app_data.track_name, "No Active Session", sizeof(s_app_data.track_name) - 1);
+    strncpy(s_app_data.track_name, DEFAULT_NO_ACTIVE_SESSION_TEXT, sizeof(s_app_data.track_name) - 1);
     s_app_data.track_name[sizeof(s_app_data.track_name) - 1] = '\0';
-    strncpy(s_app_data.artist_name, "Start playing music on Spotify", sizeof(s_app_data.artist_name) - 1);
+    strncpy(s_app_data.artist_name, DEFAULT_START_MUSIC_TEXT, sizeof(s_app_data.artist_name) - 1);
     s_app_data.artist_name[sizeof(s_app_data.artist_name) - 1] = '\0';
     now_playing_update_display();
     return;
@@ -322,8 +318,8 @@ void now_playing_update_display(void) {
   const char *artist_text;
   
   if (!s_app_data.is_active_session) {
-    track_text = "No Active Session";
-    artist_text = "Start playing music on Spotify";
+    track_text = DEFAULT_NO_ACTIVE_SESSION_TEXT;
+    artist_text = DEFAULT_START_MUSIC_TEXT;
   } else {
     track_text = s_app_data.track_name;
     artist_text = s_app_data.artist_name;
@@ -345,8 +341,8 @@ void now_playing_update_display(void) {
   int artist_height = now_playing_calculate_text_height(artist_text, artist_font, bounds.size.w - ACTION_BAR_WIDTH - 20);
 
   // Ensure minimum heights
-  if (track_height < 30) track_height = 30;
-  if (artist_height < 25) artist_height = 25;
+  if (track_height < MIN_TRACK_HEIGHT) track_height = MIN_TRACK_HEIGHT;
+  if (artist_height < MIN_ARTIST_HEIGHT) artist_height = MIN_ARTIST_HEIGHT;
 
   // Allow artist to move further down if track name is very long
   int max_track_height = bounds.size.h - 80; // Reserve space for artist + clock + margins
@@ -420,7 +416,7 @@ void now_playing_update_clock(void) {
   time_t now = time(NULL);
   struct tm *tick_time = localtime(&now);
   
-  static char clock_text[16];
+  static char clock_text[CLOCK_TEXT_SIZE];
   strftime(clock_text, sizeof(clock_text), "%H:%M", tick_time);
   
   text_layer_set_text(s_clock_layer, clock_text);
@@ -431,7 +427,7 @@ void now_playing_update_clock(void) {
   }
   
   // Restart timer for next update (every minute)
-  s_clock_timer = app_timer_register(60000, (AppTimerCallback)now_playing_update_clock, NULL);
+  s_clock_timer = app_timer_register(CLOCK_UPDATE_INTERVAL_MS, (AppTimerCallback)now_playing_update_clock, NULL);
 }
 
 void now_playing_request_volume_change(ButtonId button, int delta) {
@@ -451,7 +447,7 @@ void now_playing_request_volume_change(ButtonId button, int delta) {
   
   // Only fetch current volume if we haven't fetched it recently (within last 2 seconds)
   time_t current_time = time(NULL);
-  if (current_time - s_app_data.last_volume_fetch_time > 2) {
+  if (current_time - s_app_data.last_volume_fetch_time > VOLUME_FETCH_INTERVAL_MS / 1000) {
     s_app_data.last_volume_fetch_time = current_time;
     spotify_api_make_call("/me/player", "GET", NULL);
   } else {
@@ -470,8 +466,8 @@ void now_playing_apply_volume_change(void) {
   int new_volume = s_app_data.volume_percent + s_app_data.pending_volume_delta;
   
   // Clamp to valid range
-  if (new_volume < 0) new_volume = 0;
-  if (new_volume > 100) new_volume = 100;
+  if (new_volume < VOLUME_MIN) new_volume = VOLUME_MIN;
+  if (new_volume > VOLUME_MAX) new_volume = VOLUME_MAX;
   
   // APP_LOG(APP_LOG_LEVEL_INFO, "Applying volume change: current=%d, delta=%d, new=%d",
   //         s_app_data.volume_percent, s_app_data.pending_volume_delta, new_volume);
@@ -491,7 +487,7 @@ void now_playing_apply_volume_change(void) {
   
   // Refresh now playing data after volume change
   // Note: This is a one-shot timer that will clean itself up
-  app_timer_register(500, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
+  app_timer_register(API_RETRY_DELAY_MS, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
 }
 
 void now_playing_show_volume_error(ButtonId button) {
@@ -517,7 +513,7 @@ void now_playing_show_volume_error(ButtonId button) {
   }
   
   // Clear the error after 1 second
-  s_app_data.volume_error_timer = app_timer_register(1000, (AppTimerCallback)now_playing_clear_volume_error, NULL);
+  s_app_data.volume_error_timer = app_timer_register(VOLUME_ERROR_DISPLAY_MS, (AppTimerCallback)now_playing_clear_volume_error, NULL);
 }
 
 void now_playing_clear_volume_error(void) {
@@ -538,12 +534,12 @@ void now_playing_clear_volume_error(void) {
 
 int now_playing_calculate_text_height(const char *text, GFont font, int width) {
   if (!text || strlen(text) == 0) {
-    return 20; // Default height for empty text
+    return TEXT_PADDING * 4; // Default height for empty text
   }
 
   // Use graphics_text_layout_get_content_size to calculate the height needed
-  GRect bounds = GRect(0, 0, width, 200); // Large height to measure
+  GRect bounds = GRect(0, 0, width, MAX_TEXT_HEIGHT); // Large height to measure
   GSize text_size = graphics_text_layout_get_content_size(text, font, bounds, GTextOverflowModeWordWrap, GTextAlignmentCenter);
 
-  return text_size.h + 5; // Add small padding
+  return text_size.h + TEXT_PADDING; // Add small padding
 }

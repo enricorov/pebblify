@@ -1,6 +1,8 @@
 #include "spotify_api.h"
 #include "../windows/now_playing.h"
 #include "../windows/auth_window.h"
+#include "../core/constants.h"
+#include "message_keys.auto.h"
 
 void spotify_api_init(void) {
   // Set up AppMessage
@@ -8,8 +10,8 @@ void spotify_api_init(void) {
   app_message_register_outbox_failed(spotify_api_app_message_outbox_failed);
   app_message_register_outbox_sent(spotify_api_app_message_outbox_sent);
   
-  const uint32_t inbox_size = 1024;
-  const uint32_t outbox_size = 1024;
+  const uint32_t inbox_size = INBOX_SIZE;
+  const uint32_t outbox_size = OUTBOX_SIZE;
   app_message_open(inbox_size, outbox_size);
 }
 
@@ -21,16 +23,17 @@ void spotify_api_make_call(const char *path, const char *method, const char *dat
   DictionaryIterator *iter;
   app_message_outbox_begin(&iter);
   
-  dict_write_uint8(iter, 4, 1); // API_CALL message type (key 4, value 1)
-  dict_write_cstring(iter, 10, path); // API_PATH (key 10)
-  dict_write_cstring(iter, 11, method); // HTTP_METHOD (key 11)
+  dict_write_uint8(iter, 10004, 1); // API_CALL message type (hardcoded)
+  dict_write_cstring(iter, 10010, path); // API_PATH (hardcoded)
+  dict_write_cstring(iter, 10011, method); // HTTP_METHOD (hardcoded)
   if (data) {
-    dict_write_cstring(iter, 12, data); // API_DATA (key 12)
+    dict_write_cstring(iter, 10012, data); // API_DATA (hardcoded)
   }
   
-  // Debug: Log the API call being made
-  // APP_LOG(APP_LOG_LEVEL_INFO, "Making Spotify API call: %s %s", method, path);
-  
+  // APP_LOG(APP_LOG_LEVEL_INFO, "C->JS: Sending API_CALL message: %s %s", method, path);
+  // APP_LOG(APP_LOG_LEVEL_INFO, "C: MESSAGE_KEY_API_CALL = %lu", (unsigned long)MESSAGE_KEY_API_CALL);
+  // APP_LOG(APP_LOG_LEVEL_INFO, "C: MESSAGE_KEY_API_PATH = %lu", (unsigned long)MESSAGE_KEY_API_PATH);
+  // APP_LOG(APP_LOG_LEVEL_INFO, "C: MESSAGE_KEY_HTTP_METHOD = %lu", (unsigned long)MESSAGE_KEY_HTTP_METHOD);
   app_message_outbox_send();
 }
 
@@ -44,30 +47,30 @@ void spotify_api_refresh_now_playing(void) {
 
 void spotify_api_play_pause_track(void) {
   const char *action = s_app_data.is_playing ? "pause" : "play";
-  char path[64];
+  char path[API_PATH_SIZE];
   snprintf(path, sizeof(path), "/me/player/%s", action);
   spotify_api_make_call(path, "PUT", NULL);
   // Refresh now playing data after play/pause
   // Note: This is a one-shot timer that will clean itself up
-  app_timer_register(500, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
+  app_timer_register(API_RETRY_DELAY_MS, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
 }
 
 void spotify_api_skip_to_next(void) {
   spotify_api_make_call("/me/player/next", "POST", NULL);
   // Refresh now playing data after skipping
   // Note: This is a one-shot timer that will clean itself up
-  app_timer_register(500, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
+  app_timer_register(API_RETRY_DELAY_MS, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
 }
 
 void spotify_api_skip_to_previous(void) {
   spotify_api_make_call("/me/player/previous", "POST", NULL);
   // Refresh now playing data after skipping
   // Note: This is a one-shot timer that will clean itself up
-  app_timer_register(500, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
+  app_timer_register(API_RETRY_DELAY_MS, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
 }
 
 void spotify_api_set_volume(int volume_percent, ButtonId button) {
-  char path[128];
+  char path[API_PATH_SIZE];
   snprintf(path, sizeof(path), "/me/player/volume?volume_percent=%d", volume_percent);
   // APP_LOG(APP_LOG_LEVEL_INFO, "Setting volume to %d%%", volume_percent);
   
@@ -81,12 +84,12 @@ void spotify_api_handle_response(DictionaryIterator *iter) {
   // APP_LOG(APP_LOG_LEVEL_INFO, "Received API response");
   
   // Get parsed data from JavaScript
-  Tuple *track_name_tuple = dict_find(iter, 15); // TRACK_NAME key
-  Tuple *artist_name_tuple = dict_find(iter, 16); // ARTIST_NAME key
-  Tuple *is_playing_tuple = dict_find(iter, 17); // IS_PLAYING key
-  Tuple *volume_tuple = dict_find(iter, 18); // VOLUME_PERCENT key
-  Tuple *can_skip_prev_tuple = dict_find(iter, 19); // CAN_SKIP_PREV key
-  Tuple *can_skip_next_tuple = dict_find(iter, 20); // CAN_SKIP_NEXT key
+  Tuple *track_name_tuple = dict_find(iter, MESSAGE_KEY_TRACK_NAME); // TRACK_NAME key
+  Tuple *artist_name_tuple = dict_find(iter, MESSAGE_KEY_ARTIST_NAME); // ARTIST_NAME key
+  Tuple *is_playing_tuple = dict_find(iter, MESSAGE_KEY_IS_PLAYING); // IS_PLAYING key
+  Tuple *volume_tuple = dict_find(iter, MESSAGE_KEY_VOLUME_PERCENT); // VOLUME_PERCENT key
+  Tuple *can_skip_prev_tuple = dict_find(iter, MESSAGE_KEY_CAN_SKIP_PREV); // CAN_SKIP_PREV key
+  Tuple *can_skip_next_tuple = dict_find(iter, MESSAGE_KEY_CAN_SKIP_NEXT); // CAN_SKIP_NEXT key
   
   // Update track name only if provided (preserve existing data if not)
   if (track_name_tuple && track_name_tuple->value->cstring && strlen(track_name_tuple->value->cstring) > 0) {
@@ -118,19 +121,19 @@ void spotify_api_handle_response(DictionaryIterator *iter) {
       int volume_diff = abs(api_volume - s_app_data.last_known_volume);
       
       // Detect the specific "50 bug" - if API suddenly returns 50, it's likely stale
-      if (api_volume == 50 && s_app_data.last_known_volume != 50) {
+      if (api_volume == VOLUME_DEFAULT && s_app_data.last_known_volume != VOLUME_DEFAULT) {
         is_suspicious = true;
-        APP_LOG(APP_LOG_LEVEL_INFO, "Detected '50 bug' - API returned 50, last known was %d", s_app_data.last_known_volume);
+        APP_LOG(APP_LOG_LEVEL_INFO, "Detected '50 bug' - API returned %d, last known was %d", VOLUME_DEFAULT, s_app_data.last_known_volume);
       }
       
       // Detect large unexpected jumps (more than 15% change without a pending change)
-      if (volume_diff > 15 && !s_app_data.volume_change_pending) {
+      if (volume_diff > VOLUME_SUSPICIOUS_THRESHOLD && !s_app_data.volume_change_pending) {
         is_suspicious = true;
         APP_LOG(APP_LOG_LEVEL_INFO, "Detected large volume jump (%d -> %d) without pending change", s_app_data.last_known_volume, api_volume);
       }
       
       // During pending changes, be more strict about what we accept
-      if (s_app_data.volume_change_pending && volume_diff > 10 && abs(s_app_data.pending_volume_delta) <= 10) {
+      if (s_app_data.volume_change_pending && volume_diff > VOLUME_PENDING_THRESHOLD && abs(s_app_data.pending_volume_delta) <= VOLUME_PENDING_THRESHOLD) {
         is_suspicious = true;
         APP_LOG(APP_LOG_LEVEL_INFO, "Detected unexpected volume change during pending operation");
       }
@@ -169,7 +172,7 @@ void spotify_api_handle_response(DictionaryIterator *iter) {
 }
 
 void spotify_api_handle_error(DictionaryIterator *iter) {
-  Tuple *error_tuple = dict_find(iter, 13); // ERROR_MESSAGE key
+  Tuple *error_tuple = dict_find(iter, MESSAGE_KEY_ERROR_MESSAGE);
   if (error_tuple) {
     APP_LOG(APP_LOG_LEVEL_ERROR, "API Error: %s", error_tuple->value->cstring);
     
@@ -202,11 +205,13 @@ void spotify_api_handle_error(DictionaryIterator *iter) {
 }
 
 void spotify_api_app_message_handler(DictionaryIterator *iter, void *context) {
+  // APP_LOG(APP_LOG_LEVEL_INFO, "C: Received message from JS");
+  
   // Check for different message types by looking at the keys
-  Tuple *auth_success_tuple = dict_find(iter, 1); // AUTH_SUCCESS
-  Tuple *auth_error_tuple = dict_find(iter, 2);   // AUTH_ERROR
-  Tuple *api_response_tuple = dict_find(iter, 5); // API_RESPONSE
-  Tuple *api_error_tuple = dict_find(iter, 6);    // API_ERROR
+  Tuple *auth_success_tuple = dict_find(iter, MESSAGE_KEY_AUTH_SUCCESS);
+  Tuple *auth_error_tuple = dict_find(iter, MESSAGE_KEY_AUTH_ERROR);
+  Tuple *api_response_tuple = dict_find(iter, MESSAGE_KEY_API_RESPONSE);
+  Tuple *api_error_tuple = dict_find(iter, MESSAGE_KEY_API_ERROR);
   
   // APP_LOG(APP_LOG_LEVEL_INFO, "Message received - auth_success: %d, auth_error: %d, api_response: %d, api_error: %d", 
   //         auth_success_tuple ? 1 : 0, auth_error_tuple ? 1 : 0, api_response_tuple ? 1 : 0, api_error_tuple ? 1 : 0);

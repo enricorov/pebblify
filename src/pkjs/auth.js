@@ -3,32 +3,18 @@
 var axios = require('axios');
 var Settings = require('pebblejs/settings');
 var sha256 = require('./sha256');
+var constants = require('./constants');
+var messageKeys = require('message_keys');
 
 // Spotify API constants
-var CLIENT_ID = '152d31f9089d4be0b6605671dae99c3f';
-var PEBBLE_REDIRECT_URI = 'pebblejs://close';
-var SCOPES = [
-  'user-read-private',
-  'user-read-email',
-  'user-read-playback-state',
-  'user-modify-playback-state',
-  'user-read-currently-playing',
-  'playlist-read-private',
-  'playlist-read-collaborative',
-];
-var ACCOUNTS_BASE_URL = 'https://accounts.spotify.com';
-var API_BASE_URL = 'https://api.spotify.com/v1';
+var CLIENT_ID = constants.SPOTIFY_CONFIG.CLIENT_ID;
+var PEBBLE_REDIRECT_URI = constants.SPOTIFY_CONFIG.PEBBLE_REDIRECT_URI;
+var SCOPES = constants.SPOTIFY_CONFIG.SCOPES;
+var ACCOUNTS_BASE_URL = constants.SPOTIFY_CONFIG.ACCOUNTS_BASE_URL;
+var API_BASE_URL = constants.SPOTIFY_CONFIG.API_BASE_URL;
 
 // Message keys for communication with C app
-var MESSAGE_KEYS = {
-  AUTH_REQUEST: 0,
-  AUTH_SUCCESS: 1,
-  AUTH_ERROR: 2,
-  TOKEN_REFRESH: 3,
-  API_CALL: 4,
-  API_RESPONSE: 5,
-  API_ERROR: 6
-};
+// These are auto-generated from package.json and available as global variables
 
 function SpotifyAuth() {
   // console.log('SpotifyAuth constructor called');
@@ -55,25 +41,29 @@ SpotifyAuth.prototype.setupAppMessageHandlers = function() {
   // Handle authentication requests from C app
   Pebble.addEventListener('appmessage', function(e) {
     var message = e.payload;
-    // console.log('Received message from C app:', message);
+    // console.log('JS: Received message from C app:', message);
+    // console.log('JS: Message keys available:', Object.keys(message));
+    // console.log('JS: messageKeys.AUTH_REQUEST =', messageKeys.AUTH_REQUEST);
+    // console.log('JS: messageKeys.API_CALL =', messageKeys.API_CALL);
+    // console.log('JS: messageKeys.TOKEN_REFRESH =', messageKeys.TOKEN_REFRESH);
     
-    // Check for AUTH_REQUEST (key 0)
-    if (message[0] !== undefined) {
-      // console.log('Received AUTH_REQUEST');
+    // Check for AUTH_REQUEST (try both numeric and string keys)
+    if (message[messageKeys.AUTH_REQUEST] !== undefined || message['AUTH_REQUEST'] !== undefined) {
+      // console.log('JS: Received AUTH_REQUEST');
       self.handleAuthRequest();
     }
-    // Check for TOKEN_REFRESH (key 3)
-    else if (message[3] !== undefined) {
-      // console.log('Received TOKEN_REFRESH');
+    // Check for TOKEN_REFRESH (try both numeric and string keys)
+    else if (message[messageKeys.TOKEN_REFRESH] !== undefined || message['TOKEN_REFRESH'] !== undefined) {
+      // console.log('JS: Received TOKEN_REFRESH');
       self.refreshAccessToken();
     }
-    // Check for API_CALL (key 4)
-    else if (message[4] !== undefined) {
-      // console.log('Received API_CALL');
+    // Check for API_CALL (try both numeric and string keys)
+    else if (message[messageKeys.API_CALL] !== undefined || message['API_CALL'] !== undefined) {
+      // console.log('JS: Received API_CALL');
       self.handleApiCall(message);
     }
     else {
-      // console.log('Received unknown message type');
+      // console.log('JS: Received unknown message type');
     }
   });
 };
@@ -111,11 +101,11 @@ SpotifyAuth.prototype.initSettingsPage = function() {
 
 SpotifyAuth.prototype.getAuthorizationUrl = function() {
   // Create and store a random "state" value
-  var state = this.generateRandomString(16);
+  var state = this.generateRandomString(constants.PKCE_CONFIG.STATE_LENGTH);
   localStorage.setItem('pkceState', state);
 
   // Create and store a new PKCE code_verifier (the plaintext random secret)
-  var codeVerifier = this.generateRandomString(128);
+  var codeVerifier = this.generateRandomString(constants.PKCE_CONFIG.CODE_VERIFIER_LENGTH);
   localStorage.setItem('pkceCodeVerifier', codeVerifier);
 
   // Hash and base64-urlencode the secret to use as the challenge
@@ -217,18 +207,18 @@ SpotifyAuth.prototype.refreshAccessToken = function() {
 };
 
 SpotifyAuth.prototype.handleApiCall = function(message) {
-  // console.log('handleApiCall called with message:', message);
+  // console.log('JS: Handling API call:', message);
   var self = this;
   if (!this.accessToken) {
-    // console.log('No access token available');
+    // console.log('JS: No access token available');
     this.sendApiError('No access token available');
     return;
   }
 
-  // Extract API call details from message
-  var apiPath = message[10] || message.api_path;
-  var httpMethod = message[11] || message.http_method || 'GET';
-  var data = message[12] || message.data || {};
+  // Extract API call details from message (try both numeric and string keys)
+  var apiPath = message[messageKeys.API_PATH] || message['API_PATH'] || message.api_path;
+  var httpMethod = message[messageKeys.HTTP_METHOD] || message['HTTP_METHOD'] || message.http_method || 'GET';
+  var data = message[messageKeys.API_DATA] || message['API_DATA'] || message.data || {};
   
   // Check if this is a volume change request
   if (apiPath && apiPath.includes('/me/player/volume')) {
@@ -252,13 +242,13 @@ SpotifyAuth.prototype.handleApiCall = function(message) {
   }).catch(function(error) {
     console.error('API call failed:', error);
     
-    if (error.response && error.response.status === 401) {
+    if (error.response && error.response.status === constants.HTTP_STATUS.UNAUTHORIZED) {
       // Token expired, try to refresh
       self.refreshAccessToken();
       // Retry the API call
       setTimeout(function() {
         self.handleApiCall(message);
-      }, 1000);
+      }, constants.TIMER_INTERVALS.API_RETRY_DELAY);
     } else {
       self.sendApiError(error.message);
     }
@@ -310,15 +300,15 @@ SpotifyAuth.prototype.getCurrentVolumeFromAPI = function(callback) {
         callback(volume);
       } else {
         console.log('No volume data in API response, using default 50');
-        callback(50);
+        callback(constants.VOLUME_CONFIG.DEFAULT);
       }
     } catch (e) {
       console.error('Failed to parse volume API response:', e);
-      callback(50);
+      callback(constants.VOLUME_CONFIG.DEFAULT);
     }
   }).catch(function(error) {
     console.error('Failed to get current volume:', error);
-    callback(50);
+    callback(constants.VOLUME_CONFIG.DEFAULT);
   });
 };
 
@@ -341,8 +331,8 @@ SpotifyAuth.prototype.handleVolumeChangeRequest = function(targetVolume) {
     var newTargetVolume = this.pendingVolumeChange.originalVolume + totalDelta;
     
     // Clamp to valid range
-    if (newTargetVolume < 0) newTargetVolume = 0;
-    if (newTargetVolume > 100) newTargetVolume = 100;
+    if (newTargetVolume < constants.VOLUME_CONFIG.MIN) newTargetVolume = constants.VOLUME_CONFIG.MIN;
+    if (newTargetVolume > constants.VOLUME_CONFIG.MAX) newTargetVolume = constants.VOLUME_CONFIG.MAX;
     
     this.pendingVolumeChange.targetVolume = newTargetVolume;
     this.pendingVolumeChange.volumeDelta = totalDelta; // This delta is now the total delta from original
@@ -361,7 +351,7 @@ SpotifyAuth.prototype.handleVolumeChangeRequest = function(targetVolume) {
   
   this.volumeChangeTimer = setTimeout(function() {
     self.executeVolumeChange();
-  }, 150); // 150ms delay to allow for rapid presses
+  }, constants.TIMER_INTERVALS.VOLUME_CHANGE_DELAY); // 150ms delay to allow for rapid presses
 };
 
 SpotifyAuth.prototype.executeVolumeChange = function() {
@@ -378,8 +368,8 @@ SpotifyAuth.prototype.executeVolumeChange = function() {
   console.log('Executing volume change: target=' + targetVolume + ', delta=' + volumeDelta);
   
   // Check rate limit - only allow API calls every 300ms
-  if (currentTime - this.lastVolumeApiCall < 300) {
-    var waitTime = 300 - (currentTime - this.lastVolumeApiCall);
+  if (currentTime - this.lastVolumeApiCall < constants.TIMER_INTERVALS.VOLUME_RATE_LIMIT) {
+    var waitTime = constants.TIMER_INTERVALS.VOLUME_RATE_LIMIT - (currentTime - this.lastVolumeApiCall);
     console.log('Rate limiting: waiting ' + waitTime + 'ms before API call');
     
     // Reschedule the execution after the rate limit period
@@ -432,7 +422,7 @@ SpotifyAuth.prototype.executeVolumeChange = function() {
 
 // Utility functions
 SpotifyAuth.prototype.generateRandomString = function(length) {
-  var charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+  var charset = constants.PKCE_CONFIG.CHARSET;
   var result = '';
   for (var i = 0; i < length; i++) {
     result += charset.charAt(Math.floor(Math.random() * charset.length));
@@ -455,43 +445,45 @@ SpotifyAuth.prototype.pkceChallengeFromVerifier = function(verifier) {
 
 // Message sending functions
 SpotifyAuth.prototype.sendAuthSuccess = function() {
+  // console.log('JS: Sending AUTH_SUCCESS message to C app');
   console.log('sendAuthSuccess called');
   console.log('Access token length:', this.accessToken ? this.accessToken.length : 0);
   console.log('Refresh token length:', this.refreshToken ? this.refreshToken.length : 0);
   console.log('Token expires at:', this.tokenExpiresAt);
   
   Pebble.sendAppMessage({
-    1: 1, // AUTH_SUCCESS key
-    7: this.accessToken, // ACCESS_TOKEN key
-    8: this.refreshToken, // REFRESH_TOKEN key
-    9: this.tokenExpiresAt // EXPIRES_AT key
+    [messageKeys.AUTH_SUCCESS]: 1, // AUTH_SUCCESS key
+    [messageKeys.ACCESS_TOKEN]: this.accessToken, // ACCESS_TOKEN key
+    [messageKeys.REFRESH_TOKEN]: this.refreshToken, // REFRESH_TOKEN key
+    [messageKeys.EXPIRES_AT]: this.tokenExpiresAt // EXPIRES_AT key
   });
   
-  console.log('Auth success message sent to C app');
+  // console.log('Auth success message sent to C app');
 };
 
 SpotifyAuth.prototype.sendAuthError = function(error) {
   Pebble.sendAppMessage({
-    2: 1, // AUTH_ERROR key
+    [messageKeys.AUTH_ERROR]: 1, // AUTH_ERROR key
     error: error
   });
 };
 
 SpotifyAuth.prototype.sendApiResponse = function(data) {
   Pebble.sendAppMessage({
-    5: 1, // API_RESPONSE key
-    14: JSON.stringify(data) // RESPONSE_DATA key
+    [messageKeys.API_RESPONSE]: 1, // API_RESPONSE key
+    [messageKeys.RESPONSE_DATA]: JSON.stringify(data) // RESPONSE_DATA key
   });
 };
 
 SpotifyAuth.prototype.sendParsedNowPlayingData = function(data) {
+  // console.log('JS: Sending API_RESPONSE message to C app');
   // console.log('Parsing now playing data:', data);
   
   // Parse the Spotify API response
-  var trackName = '';
+  var trackName = constants.DEFAULT_TEXTS.NO_SESSION;
   var artistName = '';
   var isPlaying = false;
-  var volumePercent = 50;
+  var volumePercent = constants.VOLUME_CONFIG.DEFAULT;
   var canSkipPrev = true;
   var canSkipNext = true;
   
@@ -514,7 +506,7 @@ SpotifyAuth.prototype.sendParsedNowPlayingData = function(data) {
       
       console.log('API volume check: API=' + volumePercent + ', local=' + this.localVolume + ', timeSince=' + timeSinceLastChange + 'ms');
       
-      if (timeSinceLastChange < 2000) { // 2 seconds grace period
+      if (timeSinceLastChange < constants.TIMER_INTERVALS.VOLUME_STALE_GRACE) { // 2 seconds grace period
         console.log('Ignoring stale API volume update:', volumePercent, '(local:', this.localVolume + ')');
         // Use our local volume instead
         volumePercent = this.localVolume;
@@ -544,13 +536,13 @@ SpotifyAuth.prototype.sendParsedNowPlayingData = function(data) {
   // });
   
   var messageToSend = {
-    5: 1, // API_RESPONSE key
-    15: trackName, // TRACK_NAME key
-    16: artistName, // ARTIST_NAME key
-    17: isPlaying ? 1 : 0, // IS_PLAYING key
-    18: volumePercent, // VOLUME_PERCENT key
-    19: canSkipPrev ? 1 : 0, // CAN_SKIP_PREV key
-    20: canSkipNext ? 1 : 0 // CAN_SKIP_NEXT key
+    [messageKeys.API_RESPONSE]: 1, // API_RESPONSE key
+    [messageKeys.TRACK_NAME]: trackName, // TRACK_NAME key
+    [messageKeys.ARTIST_NAME]: artistName, // ARTIST_NAME key
+    [messageKeys.IS_PLAYING]: isPlaying ? 1 : 0, // IS_PLAYING key
+    [messageKeys.VOLUME_PERCENT]: volumePercent, // VOLUME_PERCENT key
+    [messageKeys.CAN_SKIP_PREV]: canSkipPrev ? 1 : 0, // CAN_SKIP_PREV key
+    [messageKeys.CAN_SKIP_NEXT]: canSkipNext ? 1 : 0 // CAN_SKIP_NEXT key
   };
   
   // console.log('Sending message to C app:', messageToSend);
@@ -562,8 +554,8 @@ SpotifyAuth.prototype.sendParsedNowPlayingData = function(data) {
 
 SpotifyAuth.prototype.sendApiError = function(error) {
   Pebble.sendAppMessage({
-    6: 1, // API_ERROR key
-    13: error // ERROR_MESSAGE key
+    [messageKeys.API_ERROR]: 1, // API_ERROR key
+    [messageKeys.ERROR_MESSAGE]: error // ERROR_MESSAGE key
   });
 };
 
