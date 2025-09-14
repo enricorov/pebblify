@@ -23,11 +23,11 @@ void spotify_api_make_call(const char *path, const char *method, const char *dat
   DictionaryIterator *iter;
   app_message_outbox_begin(&iter);
   
-  dict_write_uint8(iter, 10004, 1); // API_CALL message type (hardcoded)
-  dict_write_cstring(iter, 10010, path); // API_PATH (hardcoded)
-  dict_write_cstring(iter, 10011, method); // HTTP_METHOD (hardcoded)
+  dict_write_uint8(iter, MESSAGE_KEY_API_CALL, 1); // API_CALL message type
+  dict_write_cstring(iter, MESSAGE_KEY_API_PATH, path); // API_PATH
+  dict_write_cstring(iter, MESSAGE_KEY_HTTP_METHOD, method); // HTTP_METHOD
   if (data) {
-    dict_write_cstring(iter, 10012, data); // API_DATA (hardcoded)
+    dict_write_cstring(iter, MESSAGE_KEY_API_DATA, data); // API_DATA
   }
   
   // APP_LOG(APP_LOG_LEVEL_INFO, "C->JS: Sending API_CALL message: %s %s", method, path);
