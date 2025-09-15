@@ -27,6 +27,7 @@ static TextLayer *s_artist_layer;
 static TextLayer *s_clock_layer;
 static ActionBarLayer *s_action_bar_layer;
 static AppTimer *s_clock_timer;
+static AppTimer *s_action_feedback_timer;
 
 // ============================================================================
 // Module Initialization and Cleanup
@@ -83,10 +84,16 @@ void now_playing_window_pop(void) {
       app_timer_cancel(s_clock_timer);
       s_clock_timer = NULL;
     }
+    if (s_action_feedback_timer) {
+      app_timer_cancel(s_action_feedback_timer);
+      s_action_feedback_timer = NULL;
+    }
     if (s_app_data.volume_error_timer) {
       app_timer_cancel(s_app_data.volume_error_timer);
       s_app_data.volume_error_timer = NULL;
     }
+    
+    // Long click handlers are automatically cleaned up when window is destroyed
     
     window_stack_pop(true);
     s_app_data.current_state = APP_STATE_MAIN_MENU;
@@ -191,15 +198,21 @@ void now_playing_window_unload(Window *window) {
   dict_write_uint8(iter, MESSAGE_KEY_STOP_POLLING, 1);
   app_message_outbox_send();
   
-  // Clean up timers
+  // Clean up timers safely
   if (s_clock_timer) {
     app_timer_cancel(s_clock_timer);
     s_clock_timer = NULL;
+  }
+  if (s_action_feedback_timer) {
+    app_timer_cancel(s_action_feedback_timer);
+    s_action_feedback_timer = NULL;
   }
   if (s_app_data.volume_error_timer) {
     app_timer_cancel(s_app_data.volume_error_timer);
     s_app_data.volume_error_timer = NULL;
   }
+  
+  // Long click handlers are automatically cleaned up when window is destroyed
   
   // Clean up UI layers
   if (s_track_layer) {
@@ -289,8 +302,11 @@ void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *context
       break;
   }
   
-  // Restore original icons after action feedback
-  app_timer_register(ACTION_FEEDBACK_DELAY_MS, (AppTimerCallback)now_playing_update_display, NULL);
+  // Restore original icons after action feedback only if window is still active
+  if (s_app_data.now_playing_window && window_stack_get_top_window() == s_app_data.now_playing_window && !s_action_feedback_timer) {
+    // Only create timer if one doesn't already exist
+    s_action_feedback_timer = app_timer_register(ACTION_FEEDBACK_DELAY_MS, (AppTimerCallback)now_playing_update_display, NULL);
+  }
 }
 
 void now_playing_handle_action(ButtonId button) {
@@ -329,6 +345,8 @@ void now_playing_handle_action(ButtonId button) {
 
 void now_playing_update_display(void) {
   if (!s_app_data.now_playing_window || window_stack_get_top_window() != s_app_data.now_playing_window) {
+    // Clear the timer since we're not updating
+    s_action_feedback_timer = NULL;
     return;
   }
   
@@ -410,6 +428,9 @@ void now_playing_update_display(void) {
       if (vol_down_bitmap) action_bar_layer_set_icon(s_action_bar_layer, BUTTON_ID_DOWN, vol_down_bitmap);
     }
   }
+  
+  // Clear the action feedback timer since we've completed the update
+  s_action_feedback_timer = NULL;
 }
 
 void now_playing_update_clock(void) {
@@ -426,11 +447,13 @@ void now_playing_update_clock(void) {
   strftime(clock_text, sizeof(clock_text), "%H:%M", tick_time);
   text_layer_set_text(s_clock_layer, clock_text);
   
-  // Schedule next update
-  if (s_clock_timer) {
-    app_timer_cancel(s_clock_timer);
+  // Schedule next update only if window is still active
+  if (s_app_data.now_playing_window && window_stack_get_top_window() == s_app_data.now_playing_window) {
+    if (s_clock_timer) {
+      app_timer_cancel(s_clock_timer);
+    }
+    s_clock_timer = app_timer_register(CLOCK_UPDATE_INTERVAL_MS, (AppTimerCallback)now_playing_update_clock, NULL);
   }
-  s_clock_timer = app_timer_register(CLOCK_UPDATE_INTERVAL_MS, (AppTimerCallback)now_playing_update_clock, NULL);
 }
 
 // ============================================================================
@@ -456,9 +479,11 @@ void now_playing_show_volume_error(ButtonId button) {
     action_bar_layer_set_icon(s_action_bar_layer, button, error_bitmap);
   }
   
-  // Clear error after timeout
-  s_app_data.volume_error_timer = app_timer_register(VOLUME_ERROR_DISPLAY_MS, 
-                                                     (AppTimerCallback)now_playing_clear_volume_error, NULL);
+  // Clear error after timeout only if window is still active
+  if (s_app_data.now_playing_window && window_stack_get_top_window() == s_app_data.now_playing_window) {
+    s_app_data.volume_error_timer = app_timer_register(VOLUME_ERROR_DISPLAY_MS, 
+                                                       (AppTimerCallback)now_playing_clear_volume_error, NULL);
+  }
 }
 
 void now_playing_clear_volume_error(void) {

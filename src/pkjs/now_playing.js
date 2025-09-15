@@ -28,11 +28,9 @@ var nowPlayingState = {
   pollingTimer: null,
   accessToken: null,
   
-  // Volume change optimization
-  pendingVolumeChange: null,      // Accumulates rapid volume button presses
-  volumeChangeTimer: null,        // Timer for delayed volume API calls
-  isChangingVolume: false,        // Flag to ignore API volume updates during changes
-  pendingVolumeApiCalls: 0,       // Track pending volume API responses
+  // Simple volume control
+  cachedVolume: null,             // Current cached volume (null until initialized)
+  volumeChangeTimer: null,        // Timer for sending accumulated volume changes
   
   // Cached track data for change detection
   cachedData: {
@@ -161,10 +159,8 @@ NowPlayingManager.prototype.startPolling = function() {
   // Start polling immediately
   this.pollNowPlaying();
   
-  // Set up recurring polling every second
-  nowPlayingState.pollingTimer = setInterval(function() {
-    this.pollNowPlaying();
-  }.bind(this), constants.TIMER_INTERVALS.POLLING_INTERVAL);
+  // Set up recurring polling using one-shot timers
+  this.scheduleNextPoll();
 };
 
 /**
@@ -179,9 +175,25 @@ NowPlayingManager.prototype.stopPolling = function() {
   nowPlayingState.isPolling = false;
   
   if (nowPlayingState.pollingTimer) {
-    clearInterval(nowPlayingState.pollingTimer);
+    clearTimeout(nowPlayingState.pollingTimer);
     nowPlayingState.pollingTimer = null;
   }
+};
+
+/**
+ * Schedules the next polling cycle using a one-shot timer
+ */
+NowPlayingManager.prototype.scheduleNextPoll = function() {
+  var self = this;
+  
+  if (!nowPlayingState.isPolling) {
+    return;
+  }
+  
+  nowPlayingState.pollingTimer = setTimeout(function() {
+    self.pollNowPlaying();
+    self.scheduleNextPoll(); // Schedule the next poll
+  }, constants.TIMER_INTERVALS.POLLING_INTERVAL);
 };
 
 /**
@@ -255,12 +267,14 @@ NowPlayingManager.prototype.parseNowPlayingData = function(data) {
       trackData.artistName = data.item.artists[0].name;
     }
     
-    // Volume handling: ignore API updates during user volume changes
+    // Volume handling: use API volume unless we have a cached volume
     if (data.device && data.device.volume_percent !== undefined) {
-      if (!nowPlayingState.isChangingVolume && nowPlayingState.pendingVolumeApiCalls === 0) {
+      if (nowPlayingState.cachedVolume === null) {
         trackData.volumePercent = data.device.volume_percent;
+      } else {
+        // Use our cached volume during user changes
+        trackData.volumePercent = nowPlayingState.cachedVolume;
       }
-      // During volume changes, keep existing cached volume to avoid conflicts
     }
     
     if (data.actions) {
@@ -348,93 +362,92 @@ NowPlayingManager.prototype.handleVolumeDown = function() {
 };
 
 // ============================================================================
-// Intelligent Volume Control System
+// Simple Volume Control System
 // ============================================================================
 
 /**
- * Implements intelligent volume change handling:
- * - First button press: immediate API call for responsive feedback
- * - Rapid presses: accumulate steps and send single API call after 500ms
- * - Prevents conflicts by ignoring API volume updates during changes
+ * Implements simple volume change handling:
+ * - First session: get initial volume reading from API
+ * - Track cached volume changes locally
+ * - Send accumulated changes every 300ms after first change
  */
 NowPlayingManager.prototype.handleVolumeChange = function(direction) {
   var self = this;
   
-  if (nowPlayingState.pendingVolumeChange) {
-    // Accumulate rapid button presses
-    if (nowPlayingState.volumeChangeTimer) {
-      clearTimeout(nowPlayingState.volumeChangeTimer);
-    }
-    
-    // Add to accumulated steps
-    nowPlayingState.pendingVolumeChange.steps += direction;
-    
-    // Clamp to valid volume range
-    var originalVolume = nowPlayingState.pendingVolumeChange.originalVolume;
-    var newVolume = originalVolume + (nowPlayingState.pendingVolumeChange.steps * constants.VOLUME_CONFIG.STEP_SIZE);
-    
-    if (newVolume < constants.VOLUME_CONFIG.MIN) {
-      newVolume = constants.VOLUME_CONFIG.MIN;
-      nowPlayingState.pendingVolumeChange.steps = Math.floor((newVolume - originalVolume) / constants.VOLUME_CONFIG.STEP_SIZE);
-    } else if (newVolume > constants.VOLUME_CONFIG.MAX) {
-      newVolume = constants.VOLUME_CONFIG.MAX;
-      nowPlayingState.pendingVolumeChange.steps = Math.floor((newVolume - originalVolume) / constants.VOLUME_CONFIG.STEP_SIZE);
-    }
-    
-    // Reset timer for accumulated changes
+  // If we haven't initialized volume yet, get it from API first
+  if (nowPlayingState.cachedVolume === null) {
+    console.log('Volume not initialized, getting initial reading from API');
+    this.getInitialVolume(function(initialVolume) {
+      nowPlayingState.cachedVolume = initialVolume;
+      self.handleVolumeChange(direction); // Retry with initialized volume
+    });
+    return;
+  }
+  
+  // Calculate new volume
+  var stepSize = constants.VOLUME_CONFIG.STEP_SIZE;
+  var newVolume = nowPlayingState.cachedVolume + (direction * stepSize);
+  
+  // Clamp to valid range
+  newVolume = Math.max(constants.VOLUME_CONFIG.MIN, Math.min(constants.VOLUME_CONFIG.MAX, newVolume));
+  
+  // Update cached volume immediately
+  nowPlayingState.cachedVolume = newVolume;
+  
+  // If this is the first change, start the timer
+  if (!nowPlayingState.volumeChangeTimer) {
+    console.log('Starting volume change timer, first change to:', newVolume);
     nowPlayingState.volumeChangeTimer = setTimeout(function() {
-      self.executeAccumulatedVolumeChange();
-    }, 500);
-    
+      self.sendAccumulatedVolumeChange();
+    }, 300);
   } else {
-    // First button press: immediate response + start accumulation
-    var currentVolume = nowPlayingState.cachedData.volumePercent;
-    var targetVolume = Math.max(constants.VOLUME_CONFIG.MIN, 
-                                Math.min(constants.VOLUME_CONFIG.MAX, 
-                                        currentVolume + (direction * constants.VOLUME_CONFIG.STEP_SIZE)));
-    
-    // Send immediate API call for responsive feedback
-    nowPlayingState.pendingVolumeApiCalls++;
-    this.makeApiCall('/me/player/volume?volume_percent=' + targetVolume, 'PUT');
-    
-    // Start accumulation for potential rapid presses
-    nowPlayingState.pendingVolumeChange = {
-      originalVolume: currentVolume,
-      steps: direction
-    };
-    nowPlayingState.isChangingVolume = true;
-    
-    // Set timer for accumulated changes
-    nowPlayingState.volumeChangeTimer = setTimeout(function() {
-      self.executeAccumulatedVolumeChange();
-    }, 500);
+    console.log('Accumulating volume change to:', newVolume);
   }
 };
 
 /**
- * Executes accumulated volume changes after delay
+ * Gets initial volume reading from API
  */
-NowPlayingManager.prototype.executeAccumulatedVolumeChange = function() {
-  if (!nowPlayingState.pendingVolumeChange) {
-    nowPlayingState.isChangingVolume = false;
+NowPlayingManager.prototype.getInitialVolume = function(callback) {
+  var self = this;
+  
+  axios.get(constants.SPOTIFY_CONFIG.API_BASE_URL + '/me/player', {
+    headers: {
+      'Authorization': 'Bearer ' + nowPlayingState.accessToken,
+      'Content-Type': 'application/json'
+    }
+  }).then(function(response) {
+    var volume = constants.VOLUME_CONFIG.DEFAULT; // Default fallback
+    
+    if (response.data && response.data.device && response.data.device.volume_percent !== undefined) {
+      volume = response.data.device.volume_percent;
+    }
+    
+    console.log('Got initial volume from API:', volume);
+    callback(volume);
+  }).catch(function(error) {
+    console.log('Failed to get initial volume, using default:', constants.VOLUME_CONFIG.DEFAULT);
+    callback(constants.VOLUME_CONFIG.DEFAULT);
+  });
+};
+
+/**
+ * Sends the accumulated volume change to API
+ */
+NowPlayingManager.prototype.sendAccumulatedVolumeChange = function() {
+  var self = this;
+  
+  if (nowPlayingState.cachedVolume === null) {
     return;
   }
   
-  var targetVolume = nowPlayingState.pendingVolumeChange.originalVolume + 
-                    (nowPlayingState.pendingVolumeChange.steps * constants.VOLUME_CONFIG.STEP_SIZE);
+  console.log('Sending accumulated volume change to:', nowPlayingState.cachedVolume);
   
-  // Clamp to valid range
-  if (targetVolume < constants.VOLUME_CONFIG.MIN) targetVolume = constants.VOLUME_CONFIG.MIN;
-  if (targetVolume > constants.VOLUME_CONFIG.MAX) targetVolume = constants.VOLUME_CONFIG.MAX;
+  // Make the API call
+  this.makeApiCall('/me/player/volume?volume_percent=' + nowPlayingState.cachedVolume, 'PUT');
   
-  // Send accumulated volume change
-  nowPlayingState.pendingVolumeApiCalls++;
-  this.makeApiCall('/me/player/volume?volume_percent=' + targetVolume, 'PUT');
-  
-  // Clear accumulation state
-  nowPlayingState.pendingVolumeChange = null;
+  // Clear the timer
   nowPlayingState.volumeChangeTimer = null;
-  nowPlayingState.isChangingVolume = false;
 };
 
 // ============================================================================
@@ -461,15 +474,8 @@ NowPlayingManager.prototype.makeApiCall = function(path, method) {
       'Content-Type': 'application/json'
     }
   }).then(function(response) {
-    // Track volume API responses to manage cache updates
-    if (path.includes('/me/player/volume')) {
-      nowPlayingState.pendingVolumeApiCalls--;
-    }
-    
-    // Trigger immediate polling to get updated state
-    setTimeout(function() {
-      self.pollNowPlaying();
-    }, 500);
+    // API call successful - no need for immediate polling
+    // The regular polling cycle will pick up the changes
   }).catch(function(error) {
     if (error.response && error.response.status === constants.HTTP_STATUS.UNAUTHORIZED) {
       self.sendError('Authentication expired');
