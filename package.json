@@ -45,7 +45,10 @@
       "IS_PLAYING",
       "VOLUME_PERCENT",
       "CAN_SKIP_PREV",
-      "CAN_SKIP_NEXT"
+      "CAN_SKIP_NEXT",
+      "ACTION",
+      "START_POLLING",
+      "STOP_POLLING"
     ],
     "resources": {
       "media": [

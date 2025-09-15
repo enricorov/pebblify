@@ -30,7 +30,7 @@ var SPOTIFY_CONFIG = {
 // Timer Intervals (in milliseconds)
 // ============================================================================
 var TIMER_INTERVALS = {
-  REFRESH_INTERVAL: 10000,        // Now playing refresh interval
+  POLLING_INTERVAL: 1000,          // Now playing polling interval (1 second)
   CLOCK_UPDATE_INTERVAL: 60000,    // Clock update interval
   VOLUME_FETCH_INTERVAL: 2000,     // Volume fetch cooldown
   VOLUME_ERROR_DISPLAY: 1000,      // Volume error display duration
@@ -45,7 +45,7 @@ var TIMER_INTERVALS = {
 // Volume Control Constants
 // ============================================================================
 var VOLUME_CONFIG = {
-  STEP_SIZE: 3,                    // Volume change per button press
+  STEP_SIZE: 5,                    // Volume change per button press
   MIN: 0,                         // Minimum volume
   MAX: 100,                       // Maximum volume
   DEFAULT: 50,                    // Default volume

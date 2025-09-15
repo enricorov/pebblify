@@ -46,50 +46,83 @@ void spotify_api_refresh_now_playing(void) {
 }
 
 void spotify_api_play_pause_track(void) {
-  const char *action = s_app_data.is_playing ? "pause" : "play";
-  char path[API_PATH_SIZE];
-  snprintf(path, sizeof(path), "/me/player/%s", action);
-  spotify_api_make_call(path, "PUT", NULL);
-  // Refresh now playing data after play/pause
-  // Note: This is a one-shot timer that will clean itself up
-  app_timer_register(API_RETRY_DELAY_MS, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
+  // Send action message key to JS instead of composing URL
+  DictionaryIterator *iter;
+  app_message_outbox_begin(&iter);
+  
+  APP_LOG(APP_LOG_LEVEL_INFO, "Sending ACTION=play_pause message to JS");
+  dict_write_cstring(iter, MESSAGE_KEY_ACTION, "play_pause");
+  
+  app_message_outbox_send();
 }
 
 void spotify_api_skip_to_next(void) {
-  spotify_api_make_call("/me/player/next", "POST", NULL);
-  // Refresh now playing data after skipping
-  // Note: This is a one-shot timer that will clean itself up
-  app_timer_register(API_RETRY_DELAY_MS, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
+  // Send action message key to JS instead of composing URL
+  DictionaryIterator *iter;
+  app_message_outbox_begin(&iter);
+  
+  APP_LOG(APP_LOG_LEVEL_INFO, "Sending ACTION=skip_next message to JS");
+  dict_write_cstring(iter, MESSAGE_KEY_ACTION, "skip_next");
+  
+  app_message_outbox_send();
 }
 
 void spotify_api_skip_to_previous(void) {
-  spotify_api_make_call("/me/player/previous", "POST", NULL);
-  // Refresh now playing data after skipping
-  // Note: This is a one-shot timer that will clean itself up
-  app_timer_register(API_RETRY_DELAY_MS, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
+  // Send action message key to JS instead of composing URL
+  DictionaryIterator *iter;
+  app_message_outbox_begin(&iter);
+  
+  APP_LOG(APP_LOG_LEVEL_INFO, "Sending ACTION=skip_prev message to JS");
+  dict_write_cstring(iter, MESSAGE_KEY_ACTION, "skip_prev");
+  
+  app_message_outbox_send();
 }
 
+void spotify_api_volume_up(void) {
+  // Track which button was pressed for error handling
+  s_app_data.volume_error_button = BUTTON_ID_UP;
+  
+  // Send action message key to JS instead of composing URL
+  DictionaryIterator *iter;
+  app_message_outbox_begin(&iter);
+  
+  APP_LOG(APP_LOG_LEVEL_INFO, "Sending ACTION=volume_up message to JS");
+  dict_write_cstring(iter, MESSAGE_KEY_ACTION, "volume_up");
+  
+  app_message_outbox_send();
+}
+
+void spotify_api_volume_down(void) {
+  // Track which button was pressed for error handling
+  s_app_data.volume_error_button = BUTTON_ID_DOWN;
+  
+  // Send action message key to JS instead of composing URL
+  DictionaryIterator *iter;
+  app_message_outbox_begin(&iter);
+  
+  APP_LOG(APP_LOG_LEVEL_INFO, "Sending ACTION=volume_down message to JS");
+  dict_write_cstring(iter, MESSAGE_KEY_ACTION, "volume_down");
+  
+  app_message_outbox_send();
+}
+
+// Keep the old function for backward compatibility, but redirect to new functions
 void spotify_api_set_volume(int volume_percent, ButtonId button) {
-  char path[API_PATH_SIZE];
-  snprintf(path, sizeof(path), "/me/player/volume?volume_percent=%d", volume_percent);
-  // APP_LOG(APP_LOG_LEVEL_INFO, "Setting volume to %d%%", volume_percent);
-  
-  // Store which button was pressed for error handling
+  // This function is now deprecated - use spotify_api_volume_up/down instead
+  // For now, we'll just store the button for error handling
   s_app_data.volume_error_button = button;
-  
-  spotify_api_make_call(path, "PUT", NULL);
 }
 
 void spotify_api_handle_response(DictionaryIterator *iter) {
   // APP_LOG(APP_LOG_LEVEL_INFO, "Received API response");
   
   // Get parsed data from JavaScript
-  Tuple *track_name_tuple = dict_find(iter, MESSAGE_KEY_TRACK_NAME); // TRACK_NAME key
-  Tuple *artist_name_tuple = dict_find(iter, MESSAGE_KEY_ARTIST_NAME); // ARTIST_NAME key
-  Tuple *is_playing_tuple = dict_find(iter, MESSAGE_KEY_IS_PLAYING); // IS_PLAYING key
-  Tuple *volume_tuple = dict_find(iter, MESSAGE_KEY_VOLUME_PERCENT); // VOLUME_PERCENT key
-  Tuple *can_skip_prev_tuple = dict_find(iter, MESSAGE_KEY_CAN_SKIP_PREV); // CAN_SKIP_PREV key
-  Tuple *can_skip_next_tuple = dict_find(iter, MESSAGE_KEY_CAN_SKIP_NEXT); // CAN_SKIP_NEXT key
+  Tuple *track_name_tuple = dict_find(iter, MESSAGE_KEY_TRACK_NAME);
+  Tuple *artist_name_tuple = dict_find(iter, MESSAGE_KEY_ARTIST_NAME);
+  Tuple *is_playing_tuple = dict_find(iter, MESSAGE_KEY_IS_PLAYING);
+  Tuple *volume_tuple = dict_find(iter, MESSAGE_KEY_VOLUME_PERCENT);
+  Tuple *can_skip_prev_tuple = dict_find(iter, MESSAGE_KEY_CAN_SKIP_PREV);
+  Tuple *can_skip_next_tuple = dict_find(iter, MESSAGE_KEY_CAN_SKIP_NEXT);
   
   // Update track name only if provided (preserve existing data if not)
   if (track_name_tuple && track_name_tuple->value->cstring && strlen(track_name_tuple->value->cstring) > 0) {
@@ -159,12 +192,6 @@ void spotify_api_handle_response(DictionaryIterator *iter) {
   
   s_app_data.is_active_session = true;
   
-  // If we have a pending volume change, apply it now that we have current volume
-  if (s_app_data.volume_change_pending) {
-    now_playing_apply_volume_change();
-    return; // Skip normal display update since apply_volume_change handles it
-  }
-  
   // Update display if now playing window is active
   if (s_app_data.now_playing_window) {
     now_playing_update_display();
@@ -177,9 +204,9 @@ void spotify_api_handle_error(DictionaryIterator *iter) {
     APP_LOG(APP_LOG_LEVEL_ERROR, "API Error: %s", error_tuple->value->cstring);
     
     // Check for specific error types
-    if (strstr(error_tuple->value->cstring, "403")) {
+    if (strstr(error_tuple->value->cstring, "403") || strstr(error_tuple->value->cstring, "Action not allowed")) {
       // Volume control failed - show X icon on the button that failed
-      APP_LOG(APP_LOG_LEVEL_INFO, "Volume control failed (403), showing error for button %d", s_app_data.volume_error_button);
+      APP_LOG(APP_LOG_LEVEL_INFO, "Volume control failed, showing error for button %d", s_app_data.volume_error_button);
       now_playing_show_volume_error(s_app_data.volume_error_button);
     } else if (strstr(error_tuple->value->cstring, "401")) {
       // Authentication error - token may be expired

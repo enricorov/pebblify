@@ -12,6 +12,8 @@ void spotify_api_refresh_now_playing(void);
 void spotify_api_play_pause_track(void);
 void spotify_api_skip_to_next(void);
 void spotify_api_skip_to_previous(void);
+void spotify_api_volume_up(void);
+void spotify_api_volume_down(void);
 void spotify_api_set_volume(int volume_percent, ButtonId button);
 
 // Message handling functions

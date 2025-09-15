@@ -452,26 +452,38 @@ SpotifyAuth.prototype.sendAuthSuccess = function() {
   console.log('Token expires at:', this.tokenExpiresAt);
   
   Pebble.sendAppMessage({
-    [messageKeys.AUTH_SUCCESS]: 1, // AUTH_SUCCESS key
-    [messageKeys.ACCESS_TOKEN]: this.accessToken, // ACCESS_TOKEN key
-    [messageKeys.REFRESH_TOKEN]: this.refreshToken, // REFRESH_TOKEN key
-    [messageKeys.EXPIRES_AT]: this.tokenExpiresAt // EXPIRES_AT key
+    [messageKeys.AUTH_SUCCESS]: 1,
+    [messageKeys.ACCESS_TOKEN]: this.accessToken,
+    [messageKeys.REFRESH_TOKEN]: this.refreshToken,
+    [messageKeys.EXPIRES_AT]: this.tokenExpiresAt
   });
+  
+  // Start now playing polling if available
+  if (typeof require !== 'undefined') {
+    try {
+      var NowPlayingManager = require('./now_playing.js');
+      NowPlayingManager.setAccessToken(this.accessToken);
+      NowPlayingManager.startPolling();
+      console.log('Now playing polling started');
+    } catch (e) {
+      console.log('Now playing manager not available:', e);
+    }
+  }
   
   // console.log('Auth success message sent to C app');
 };
 
 SpotifyAuth.prototype.sendAuthError = function(error) {
   Pebble.sendAppMessage({
-    [messageKeys.AUTH_ERROR]: 1, // AUTH_ERROR key
+    [messageKeys.AUTH_ERROR]: 1,
     error: error
   });
 };
 
 SpotifyAuth.prototype.sendApiResponse = function(data) {
   Pebble.sendAppMessage({
-    [messageKeys.API_RESPONSE]: 1, // API_RESPONSE key
-    [messageKeys.RESPONSE_DATA]: JSON.stringify(data) // RESPONSE_DATA key
+    [messageKeys.API_RESPONSE]: 1,
+    [messageKeys.RESPONSE_DATA]: JSON.stringify(data)
   });
 };
 
@@ -536,13 +548,13 @@ SpotifyAuth.prototype.sendParsedNowPlayingData = function(data) {
   // });
   
   var messageToSend = {
-    [messageKeys.API_RESPONSE]: 1, // API_RESPONSE key
-    [messageKeys.TRACK_NAME]: trackName, // TRACK_NAME key
-    [messageKeys.ARTIST_NAME]: artistName, // ARTIST_NAME key
-    [messageKeys.IS_PLAYING]: isPlaying ? 1 : 0, // IS_PLAYING key
-    [messageKeys.VOLUME_PERCENT]: volumePercent, // VOLUME_PERCENT key
-    [messageKeys.CAN_SKIP_PREV]: canSkipPrev ? 1 : 0, // CAN_SKIP_PREV key
-    [messageKeys.CAN_SKIP_NEXT]: canSkipNext ? 1 : 0 // CAN_SKIP_NEXT key
+    [messageKeys.API_RESPONSE]: 1,
+    [messageKeys.TRACK_NAME]: trackName,
+    [messageKeys.ARTIST_NAME]: artistName,
+    [messageKeys.IS_PLAYING]: isPlaying ? 1 : 0,
+    [messageKeys.VOLUME_PERCENT]: volumePercent,
+    [messageKeys.CAN_SKIP_PREV]: canSkipPrev ? 1 : 0,
+    [messageKeys.CAN_SKIP_NEXT]: canSkipNext ? 1 : 0
   };
   
   // console.log('Sending message to C app:', messageToSend);
@@ -554,8 +566,8 @@ SpotifyAuth.prototype.sendParsedNowPlayingData = function(data) {
 
 SpotifyAuth.prototype.sendApiError = function(error) {
   Pebble.sendAppMessage({
-    [messageKeys.API_ERROR]: 1, // API_ERROR key
-    [messageKeys.ERROR_MESSAGE]: error // ERROR_MESSAGE key
+    [messageKeys.API_ERROR]: 1,
+    [messageKeys.ERROR_MESSAGE]: error
   });
 };
 
@@ -623,3 +635,6 @@ Pebble.addEventListener('ready', function() {
   var auth = new SpotifyAuth();
   // console.log('Auth initialized');
 });
+
+// Export for module use
+module.exports = SpotifyAuth;

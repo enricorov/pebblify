@@ -48,6 +48,12 @@ void now_playing_window_create(void) {
 void now_playing_window_pop(void) {
   // Just pop the window from the stack, don't destroy it
   if (s_app_data.now_playing_window && window_stack_get_top_window() == s_app_data.now_playing_window) {
+    // Stop polling from JS side
+    DictionaryIterator *iter;
+    app_message_outbox_begin(&iter);
+    dict_write_uint8(iter, MESSAGE_KEY_STOP_POLLING, 1);
+    app_message_outbox_send();
+    
     // Clean up timers before popping to prevent timer leaks
     if (s_refresh_timer) {
       app_timer_cancel(s_refresh_timer);
@@ -142,21 +148,23 @@ void now_playing_window_load(Window *window) {
   // Start clock timer (update every minute)
   now_playing_update_clock();
   
-  // Refresh current track data
+  // Start polling from JS side
   if (s_app_data.is_authenticated) {
-    spotify_api_refresh_now_playing();
-    
-    // Cancel any existing refresh timer before creating a new one
-    if (s_refresh_timer) {
-      app_timer_cancel(s_refresh_timer);
-    }
-    
-    // Set up periodic refresh every 10 seconds
-    s_refresh_timer = app_timer_register(REFRESH_INTERVAL_MS, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
+    // Send message to JS to start polling
+    DictionaryIterator *iter;
+    app_message_outbox_begin(&iter);
+    dict_write_uint8(iter, MESSAGE_KEY_START_POLLING, 1);
+    app_message_outbox_send();
   }
 }
 
 void now_playing_window_unload(Window *window) {
+  // Stop polling from JS side
+  DictionaryIterator *iter;
+  app_message_outbox_begin(&iter);
+  dict_write_uint8(iter, MESSAGE_KEY_STOP_POLLING, 1);
+  app_message_outbox_send();
+  
   // Clean up ALL timers
   if (s_refresh_timer) {
     app_timer_cancel(s_refresh_timer);
@@ -286,16 +294,15 @@ void now_playing_handle_action(ButtonId button) {
   switch (button) {
     case BUTTON_ID_UP:
       // Volume up
-      now_playing_request_volume_change(BUTTON_ID_UP, VOLUME_STEP_SIZE);
+      spotify_api_volume_up();
       break;
     case BUTTON_ID_SELECT:
       // Play/pause
       spotify_api_play_pause_track();
-      // Don't update display immediately - let the API response handle it
       break;
     case BUTTON_ID_DOWN:
       // Volume down
-      now_playing_request_volume_change(BUTTON_ID_DOWN, -VOLUME_STEP_SIZE);
+      spotify_api_volume_down();
       break;
     default:
       break;
@@ -430,64 +437,14 @@ void now_playing_update_clock(void) {
   s_clock_timer = app_timer_register(CLOCK_UPDATE_INTERVAL_MS, (AppTimerCallback)now_playing_update_clock, NULL);
 }
 
+// Volume change functions are now handled by action messages to JS
+// These functions are kept for backward compatibility but are no longer used
 void now_playing_request_volume_change(ButtonId button, int delta) {
-  // If there's already a volume change pending, accumulate the delta locally
-  if (s_app_data.volume_change_pending) {
-    s_app_data.pending_volume_delta += delta;
-    // APP_LOG(APP_LOG_LEVEL_INFO, "Accumulating volume change: delta=%d, total=%d", delta, s_app_data.pending_volume_delta);
-    return;
-  }
-  
-  // Start a new volume change request
-  s_app_data.volume_change_pending = true;
-  s_app_data.pending_volume_button = button;
-  s_app_data.pending_volume_delta = delta;
-  
-  // APP_LOG(APP_LOG_LEVEL_INFO, "Requesting volume change: button=%d, delta=%d", button, delta);
-  
-  // Only fetch current volume if we haven't fetched it recently (within last 2 seconds)
-  time_t current_time = time(NULL);
-  if (current_time - s_app_data.last_volume_fetch_time > VOLUME_FETCH_INTERVAL_MS / 1000) {
-    s_app_data.last_volume_fetch_time = current_time;
-    spotify_api_make_call("/me/player", "GET", NULL);
-  } else {
-    // Use current local volume and apply change immediately
-    // APP_LOG(APP_LOG_LEVEL_INFO, "Using local volume (recent fetch), applying change immediately");
-    now_playing_apply_volume_change();
-  }
+  // Deprecated - use spotify_api_volume_up/down instead
 }
 
 void now_playing_apply_volume_change(void) {
-  if (!s_app_data.volume_change_pending) {
-    return;
-  }
-  
-  // Calculate new volume based on current API volume + accumulated delta
-  int new_volume = s_app_data.volume_percent + s_app_data.pending_volume_delta;
-  
-  // Clamp to valid range
-  if (new_volume < VOLUME_MIN) new_volume = VOLUME_MIN;
-  if (new_volume > VOLUME_MAX) new_volume = VOLUME_MAX;
-  
-  // APP_LOG(APP_LOG_LEVEL_INFO, "Applying volume change: current=%d, delta=%d, new=%d",
-  //         s_app_data.volume_percent, s_app_data.pending_volume_delta, new_volume);
-  
-  // Update local volume immediately for UI feedback
-  s_app_data.volume_percent = new_volume;
-  
-  // Update display immediately to show new volume
-  now_playing_update_display();
-  
-  // Send volume change to API
-  spotify_api_set_volume(new_volume, s_app_data.pending_volume_button);
-  
-  // Clear pending state
-  s_app_data.volume_change_pending = false;
-  s_app_data.pending_volume_delta = 0;
-  
-  // Refresh now playing data after volume change
-  // Note: This is a one-shot timer that will clean itself up
-  app_timer_register(API_RETRY_DELAY_MS, (AppTimerCallback)spotify_api_refresh_now_playing, NULL);
+  // Deprecated - volume changes are now handled by JS polling
 }
 
 void now_playing_show_volume_error(ButtonId button) {

@@ -90,7 +90,7 @@ void auth_request_authentication(void) {
   app_message_outbox_begin(&iter);
   
   // Send message_type as a string key with integer value
-  dict_write_uint8(iter, MESSAGE_KEY_AUTH_REQUEST, 0); // AUTH_REQUEST
+  dict_write_uint8(iter, MESSAGE_KEY_AUTH_REQUEST, 0);
   
   // APP_LOG(APP_LOG_LEVEL_INFO, "C->JS: Sending AUTH_REQUEST message");
   app_message_outbox_send();
