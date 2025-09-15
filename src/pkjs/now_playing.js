@@ -1,24 +1,40 @@
-// Now Playing Module for Pebblify
-// Handles polling for track information and processing actions from C
+/**
+ * Now Playing Module for Pebblify
+ * 
+ * This module handles the JavaScript side of the now playing functionality:
+ * - Polls Spotify API every second for current track information
+ * - Caches and compares data to detect changes
+ * - Sends updated track data to C side via AppMessage
+ * - Processes action commands from C side (play/pause, skip, volume)
+ * - Implements intelligent volume accumulation for rapid button presses
+ * 
+ * Communication Flow:
+ * C → JS: Action commands (ACTION key with string values)
+ * JS → C: Track data updates (TRACK_NAME, ARTIST_NAME, etc.)
+ * JS → C: Error messages (ERROR_MESSAGE)
+ */
 
 var axios = require('axios');
 var constants = require('./constants');
 var messageKeys = require('message_keys');
 
-// Now playing state
+// ============================================================================
+// Module State Management
+// ============================================================================
+
 var nowPlayingState = {
+  // Polling control
   isPolling: false,
   pollingTimer: null,
-  lastTrackData: null,
   accessToken: null,
   
-  // Volume accumulation state
-  pendingVolumeChange: null,
-  volumeChangeTimer: null,
-  isChangingVolume: false, // Flag to ignore API volume updates during changes
-  pendingVolumeApiCalls: 0, // Track number of pending volume API calls
+  // Volume change optimization
+  pendingVolumeChange: null,      // Accumulates rapid volume button presses
+  volumeChangeTimer: null,        // Timer for delayed volume API calls
+  isChangingVolume: false,        // Flag to ignore API volume updates during changes
+  pendingVolumeApiCalls: 0,       // Track pending volume API responses
   
-  // Cached track data for comparison
+  // Cached track data for change detection
   cachedData: {
     trackName: null,
     artistName: null,
@@ -29,46 +45,51 @@ var nowPlayingState = {
   }
 };
 
+// ============================================================================
+// Main NowPlayingManager Class
+// ============================================================================
+
 function NowPlayingManager() {
   this.setupAppMessageHandlers();
 }
 
+// ============================================================================
+// AppMessage Communication (C ↔ JS)
+// ============================================================================
+
+/**
+ * Sets up handlers for messages from C side
+ * C sends action commands using single ACTION key with string values
+ */
 NowPlayingManager.prototype.setupAppMessageHandlers = function() {
   var self = this;
   
   Pebble.addEventListener('appmessage', function(e) {
     var message = e.payload;
     
-    // Handle action messages from C (using single ACTION key with string values)
+    // Handle action commands from C
     if (message['ACTION'] !== undefined) {
       var action = message['ACTION'];
-      console.log('NowPlaying: Received action:', action);
       
       switch (action) {
         case 'skip_next':
-          console.log('NowPlaying: Handling skip next');
           self.handleSkipNext();
           break;
         case 'skip_prev':
-          console.log('NowPlaying: Handling skip prev');
           self.handleSkipPrev();
           break;
         case 'play_pause':
-          console.log('NowPlaying: Handling play/pause');
           self.handlePlayPause();
           break;
         case 'volume_up':
-          console.log('NowPlaying: Handling volume up');
           self.handleVolumeUp();
           break;
         case 'volume_down':
-          console.log('NowPlaying: Handling volume down');
           self.handleVolumeDown();
           break;
-        default:
-          console.log('NowPlaying: Unknown action:', action);
       }
     }
+    // Handle polling control from C
     else if (message['START_POLLING'] !== undefined) {
       self.startPolling();
     }
@@ -78,39 +99,84 @@ NowPlayingManager.prototype.setupAppMessageHandlers = function() {
   });
 };
 
+/**
+ * Sends track data to C side when changes are detected
+ */
+NowPlayingManager.prototype.sendNowPlayingData = function(data) {
+  var message = {
+    [messageKeys.API_RESPONSE]: 1,
+    [messageKeys.TRACK_NAME]: data.trackName,
+    [messageKeys.ARTIST_NAME]: data.artistName,
+    [messageKeys.IS_PLAYING]: data.isPlaying ? 1 : 0,
+    [messageKeys.VOLUME_PERCENT]: data.volumePercent,
+    [messageKeys.CAN_SKIP_PREV]: data.canSkipPrev ? 1 : 0,
+    [messageKeys.CAN_SKIP_NEXT]: data.canSkipNext ? 1 : 0
+  };
+  
+  Pebble.sendAppMessage(message, function() {
+    // Success callback - data sent to C
+  }, function(error) {
+    console.error('Failed to send track data to C:', error);
+  });
+};
+
+/**
+ * Sends error messages to C side
+ */
+NowPlayingManager.prototype.sendError = function(errorMessage) {
+  var message = {
+    [messageKeys.API_ERROR]: 1,
+    [messageKeys.ERROR_MESSAGE]: errorMessage
+  };
+  
+  Pebble.sendAppMessage(message, function() {
+    // Error message sent to C
+  }, function(error) {
+    console.error('Failed to send error to C:', error);
+  });
+};
+
+// ============================================================================
+// Polling and Data Management
+// ============================================================================
+
+/**
+ * Sets the Spotify access token for API calls
+ */
 NowPlayingManager.prototype.setAccessToken = function(token) {
   nowPlayingState.accessToken = token;
 };
 
+/**
+ * Starts polling Spotify API for track information
+ * Called by C when now playing window is opened
+ */
 NowPlayingManager.prototype.startPolling = function() {
-  if (nowPlayingState.isPolling) {
-    return; // Already polling
-  }
-  
-  if (!nowPlayingState.accessToken) {
-    console.error('Cannot start polling: no access token');
+  if (nowPlayingState.isPolling || !nowPlayingState.accessToken) {
     return;
   }
   
   nowPlayingState.isPolling = true;
-  console.log('Starting now playing polling...');
   
   // Start polling immediately
   this.pollNowPlaying();
   
-  // Set up recurring polling
+  // Set up recurring polling every second
   nowPlayingState.pollingTimer = setInterval(function() {
     this.pollNowPlaying();
   }.bind(this), constants.TIMER_INTERVALS.POLLING_INTERVAL);
 };
 
+/**
+ * Stops polling Spotify API
+ * Called by C when now playing window is closed
+ */
 NowPlayingManager.prototype.stopPolling = function() {
   if (!nowPlayingState.isPolling) {
-    return; // Not polling
+    return;
   }
   
   nowPlayingState.isPolling = false;
-  console.log('Stopping now playing polling...');
   
   if (nowPlayingState.pollingTimer) {
     clearInterval(nowPlayingState.pollingTimer);
@@ -118,6 +184,9 @@ NowPlayingManager.prototype.stopPolling = function() {
   }
 };
 
+/**
+ * Polls Spotify API for current track information
+ */
 NowPlayingManager.prototype.pollNowPlaying = function() {
   if (!nowPlayingState.accessToken) {
     return;
@@ -135,13 +204,9 @@ NowPlayingManager.prototype.pollNowPlaying = function() {
   }).then(function(response) {
     self.handleNowPlayingResponse(response.data);
   }).catch(function(error) {
-    console.error('Now playing polling failed:', error);
-    
     if (error.response && error.response.status === constants.HTTP_STATUS.UNAUTHORIZED) {
-      // Token expired, send error to C
       self.sendError('Authentication expired');
     } else if (error.response && error.response.status === constants.HTTP_STATUS.NOT_FOUND) {
-      // No active device or track
       self.handleNoActiveSession();
     } else {
       self.sendError('Connection error');
@@ -149,21 +214,26 @@ NowPlayingManager.prototype.pollNowPlaying = function() {
   });
 };
 
+/**
+ * Processes API response and sends updates to C if data changed
+ */
 NowPlayingManager.prototype.handleNowPlayingResponse = function(data) {
   var newData = this.parseNowPlayingData(data);
   
-  // Compare with cached data to detect changes
+  // Only send updates if data actually changed
   if (this.hasDataChanged(newData)) {
-    console.log('Track data changed, sending to C');
-    
-    // Update cache
+    // Update cache with new data
     nowPlayingState.cachedData = newData;
     
-    // Send to C
+    // Send updated data to C
     this.sendNowPlayingData(newData);
   }
 };
 
+/**
+ * Parses raw Spotify API response into standardized track data
+ * Handles volume update conflicts during user-initiated volume changes
+ */
 NowPlayingManager.prototype.parseNowPlayingData = function(data) {
   var trackData = {
     trackName: 'No Active Session',
@@ -185,15 +255,12 @@ NowPlayingManager.prototype.parseNowPlayingData = function(data) {
       trackData.artistName = data.item.artists[0].name;
     }
     
+    // Volume handling: ignore API updates during user volume changes
     if (data.device && data.device.volume_percent !== undefined) {
-      // Only update volume from API if we're not currently changing volume AND no volume API calls are pending
       if (!nowPlayingState.isChangingVolume && nowPlayingState.pendingVolumeApiCalls === 0) {
         trackData.volumePercent = data.device.volume_percent;
-      } else {
-        console.log('Ignoring API volume update: isChanging=' + nowPlayingState.isChangingVolume + 
-                   ', pendingApiCalls=' + nowPlayingState.pendingVolumeApiCalls + 
-                   ', API=' + data.device.volume_percent + ', cached=' + trackData.volumePercent);
       }
+      // During volume changes, keep existing cached volume to avoid conflicts
     }
     
     if (data.actions) {
@@ -205,6 +272,9 @@ NowPlayingManager.prototype.parseNowPlayingData = function(data) {
   return trackData;
 };
 
+/**
+ * Compares new data with cached data to detect changes
+ */
 NowPlayingManager.prototype.hasDataChanged = function(newData) {
   var cached = nowPlayingState.cachedData;
   
@@ -218,24 +288,9 @@ NowPlayingManager.prototype.hasDataChanged = function(newData) {
   );
 };
 
-NowPlayingManager.prototype.sendNowPlayingData = function(data) {
-  var message = {
-    [messageKeys.API_RESPONSE]: 1,
-    [messageKeys.TRACK_NAME]: data.trackName,
-    [messageKeys.ARTIST_NAME]: data.artistName,
-    [messageKeys.IS_PLAYING]: data.isPlaying ? 1 : 0,
-    [messageKeys.VOLUME_PERCENT]: data.volumePercent,
-    [messageKeys.CAN_SKIP_PREV]: data.canSkipPrev ? 1 : 0,
-    [messageKeys.CAN_SKIP_NEXT]: data.canSkipNext ? 1 : 0
-  };
-  
-  Pebble.sendAppMessage(message, function() {
-    console.log('Now playing data sent to C');
-  }, function(error) {
-    console.error('Failed to send now playing data:', error);
-  });
-};
-
+/**
+ * Handles case when no active Spotify session is found
+ */
 NowPlayingManager.prototype.handleNoActiveSession = function() {
   var noSessionData = {
     trackName: 'No Active Session',
@@ -252,64 +307,69 @@ NowPlayingManager.prototype.handleNoActiveSession = function() {
   }
 };
 
-NowPlayingManager.prototype.sendError = function(errorMessage) {
-  var message = {
-    [messageKeys.API_ERROR]: 1,
-    [messageKeys.ERROR_MESSAGE]: errorMessage
-  };
-  
-  Pebble.sendAppMessage(message, function() {
-    console.log('Error sent to C:', errorMessage);
-  }, function(error) {
-    console.error('Failed to send error message:', error);
-  });
-};
+// ============================================================================
+// Action Handlers (Called by C via AppMessage)
+// ============================================================================
 
-// Action handlers
+/**
+ * Handles skip to next track command from C
+ */
 NowPlayingManager.prototype.handleSkipNext = function() {
-  console.log('Handling skip next');
   this.makeApiCall('/me/player/next', 'POST');
 };
 
+/**
+ * Handles skip to previous track command from C
+ */
 NowPlayingManager.prototype.handleSkipPrev = function() {
-  console.log('Handling skip prev');
   this.makeApiCall('/me/player/previous', 'POST');
 };
 
+/**
+ * Handles play/pause toggle command from C
+ */
 NowPlayingManager.prototype.handlePlayPause = function() {
-  console.log('Handling play/pause');
   var action = nowPlayingState.cachedData.isPlaying ? 'pause' : 'play';
   this.makeApiCall('/me/player/' + action, 'PUT');
 };
 
+/**
+ * Handles volume up command from C
+ */
 NowPlayingManager.prototype.handleVolumeUp = function() {
-  console.log('Handling volume up');
-  this.handleVolumeChange(1); // +1 step
+  this.handleVolumeChange(1);
 };
 
+/**
+ * Handles volume down command from C
+ */
 NowPlayingManager.prototype.handleVolumeDown = function() {
-  console.log('Handling volume down');
-  this.handleVolumeChange(-1); // -1 step
+  this.handleVolumeChange(-1);
 };
 
+// ============================================================================
+// Intelligent Volume Control System
+// ============================================================================
+
+/**
+ * Implements intelligent volume change handling:
+ * - First button press: immediate API call for responsive feedback
+ * - Rapid presses: accumulate steps and send single API call after 500ms
+ * - Prevents conflicts by ignoring API volume updates during changes
+ */
 NowPlayingManager.prototype.handleVolumeChange = function(direction) {
   var self = this;
   
-  console.log('Volume change request: direction=' + direction + ', current=' + nowPlayingState.cachedData.volumePercent + ', pendingApiCalls=' + nowPlayingState.pendingVolumeApiCalls);
-  
-  // If there's already a pending volume change, accumulate it
   if (nowPlayingState.pendingVolumeChange) {
-    console.log('Accumulating volume change: current steps=' + nowPlayingState.pendingVolumeChange.steps + ', adding=' + direction);
-    
-    // Cancel the existing timer
+    // Accumulate rapid button presses
     if (nowPlayingState.volumeChangeTimer) {
       clearTimeout(nowPlayingState.volumeChangeTimer);
     }
     
-    // Add to the step count
+    // Add to accumulated steps
     nowPlayingState.pendingVolumeChange.steps += direction;
     
-    // Clamp the total steps to valid range
+    // Clamp to valid volume range
     var originalVolume = nowPlayingState.pendingVolumeChange.originalVolume;
     var newVolume = originalVolume + (nowPlayingState.pendingVolumeChange.steps * constants.VOLUME_CONFIG.STEP_SIZE);
     
@@ -321,45 +381,41 @@ NowPlayingManager.prototype.handleVolumeChange = function(direction) {
       nowPlayingState.pendingVolumeChange.steps = Math.floor((newVolume - originalVolume) / constants.VOLUME_CONFIG.STEP_SIZE);
     }
     
-    console.log('Accumulated volume change: total steps=' + nowPlayingState.pendingVolumeChange.steps + ', final volume=' + newVolume);
-    
-    // Set timer to send accumulated changes after 500ms
+    // Reset timer for accumulated changes
     nowPlayingState.volumeChangeTimer = setTimeout(function() {
       self.executeAccumulatedVolumeChange();
-    }, 500); // 500ms delay for accumulated changes
+    }, 500);
     
   } else {
-    // First button press - send immediately and start accumulation
+    // First button press: immediate response + start accumulation
     var currentVolume = nowPlayingState.cachedData.volumePercent;
     var targetVolume = Math.max(constants.VOLUME_CONFIG.MIN, 
                                 Math.min(constants.VOLUME_CONFIG.MAX, 
                                         currentVolume + (direction * constants.VOLUME_CONFIG.STEP_SIZE)));
     
-    console.log('First volume change: immediate API call from ' + currentVolume + ' to ' + targetVolume);
-    
-    // Send immediate API call and track it
+    // Send immediate API call for responsive feedback
     nowPlayingState.pendingVolumeApiCalls++;
     this.makeApiCall('/me/player/volume?volume_percent=' + targetVolume, 'PUT');
     
-    // Start accumulation for rapid presses
+    // Start accumulation for potential rapid presses
     nowPlayingState.pendingVolumeChange = {
       originalVolume: currentVolume,
       steps: direction
     };
     nowPlayingState.isChangingVolume = true;
     
-    // Set timer to send accumulated changes after 500ms
+    // Set timer for accumulated changes
     nowPlayingState.volumeChangeTimer = setTimeout(function() {
       self.executeAccumulatedVolumeChange();
-    }, 500); // 500ms delay
+    }, 500);
   }
 };
 
+/**
+ * Executes accumulated volume changes after delay
+ */
 NowPlayingManager.prototype.executeAccumulatedVolumeChange = function() {
-  var self = this;
-  
   if (!nowPlayingState.pendingVolumeChange) {
-    console.log('No accumulated volume change to execute');
     nowPlayingState.isChangingVolume = false;
     return;
   }
@@ -371,20 +427,24 @@ NowPlayingManager.prototype.executeAccumulatedVolumeChange = function() {
   if (targetVolume < constants.VOLUME_CONFIG.MIN) targetVolume = constants.VOLUME_CONFIG.MIN;
   if (targetVolume > constants.VOLUME_CONFIG.MAX) targetVolume = constants.VOLUME_CONFIG.MAX;
   
-  console.log('Executing accumulated volume change: steps=' + nowPlayingState.pendingVolumeChange.steps + 
-              ', from=' + nowPlayingState.pendingVolumeChange.originalVolume + 
-              ', to=' + targetVolume);
-  
-  // Make the API call for accumulated changes and track it
+  // Send accumulated volume change
   nowPlayingState.pendingVolumeApiCalls++;
   this.makeApiCall('/me/player/volume?volume_percent=' + targetVolume, 'PUT');
   
-  // Clear the pending change and reset flag
+  // Clear accumulation state
   nowPlayingState.pendingVolumeChange = null;
   nowPlayingState.volumeChangeTimer = null;
   nowPlayingState.isChangingVolume = false;
 };
 
+// ============================================================================
+// Spotify API Communication
+// ============================================================================
+
+/**
+ * Makes authenticated API calls to Spotify
+ * Tracks volume API calls to prevent cache conflicts
+ */
 NowPlayingManager.prototype.makeApiCall = function(path, method) {
   if (!nowPlayingState.accessToken) {
     this.sendError('No access token available');
@@ -401,17 +461,9 @@ NowPlayingManager.prototype.makeApiCall = function(path, method) {
       'Content-Type': 'application/json'
     }
   }).then(function(response) {
-    console.log('API call successful:', path);
-    
-    // If this was a volume API call, decrement the counter
+    // Track volume API responses to manage cache updates
     if (path.includes('/me/player/volume')) {
       nowPlayingState.pendingVolumeApiCalls--;
-      console.log('Volume API response received, pending calls remaining:', nowPlayingState.pendingVolumeApiCalls);
-      
-      // If this was the last pending volume API call, update cached volume
-      if (nowPlayingState.pendingVolumeApiCalls === 0) {
-        console.log('All volume API calls complete, will update cached volume on next poll');
-      }
     }
     
     // Trigger immediate polling to get updated state
@@ -419,8 +471,6 @@ NowPlayingManager.prototype.makeApiCall = function(path, method) {
       self.pollNowPlaying();
     }, 500);
   }).catch(function(error) {
-    console.error('API call failed:', path, error);
-    
     if (error.response && error.response.status === constants.HTTP_STATUS.UNAUTHORIZED) {
       self.sendError('Authentication expired');
     } else if (error.response && error.response.status === constants.HTTP_STATUS.FORBIDDEN) {
@@ -430,6 +480,10 @@ NowPlayingManager.prototype.makeApiCall = function(path, method) {
     }
   });
 };
+
+// ============================================================================
+// Module Export
+// ============================================================================
 
 // Export singleton instance
 var nowPlayingManager = new NowPlayingManager();
