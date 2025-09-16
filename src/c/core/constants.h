@@ -6,8 +6,6 @@
 // ============================================================================
 // Buffer Sizes
 // ============================================================================
-#define ACCESS_TOKEN_SIZE 512
-#define REFRESH_TOKEN_SIZE 512
 #define AUTH_ERROR_SIZE 128
 #define TRACK_NAME_SIZE 128
 #define ARTIST_NAME_SIZE 128
@@ -63,10 +61,7 @@
 // ============================================================================
 // Persistent Storage Keys
 // ============================================================================
-#define PERSIST_KEY_ACCESS_TOKEN 1
-#define PERSIST_KEY_REFRESH_TOKEN 2
-#define PERSIST_KEY_TOKEN_EXPIRES_AT 3
-#define PERSIST_KEY_IS_AUTHENTICATED 4
+// No persistent storage keys needed - authentication managed by JavaScript
 
 // ============================================================================
 // AppMessage Buffer Sizes

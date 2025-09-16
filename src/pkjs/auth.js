@@ -508,6 +508,11 @@ SpotifyAuth.prototype.loadStoredTokens = function() {
       if (tokensChanged || !this.accessToken) {
         this.sendAuthSuccess();
       }
+    } 
+    // If tokens exist but are expired, try to refresh automatically
+    else if (this.accessToken && this.refreshToken && this.tokenExpiresAt && Date.now() >= this.tokenExpiresAt) {
+      console.log('Access token expired, attempting refresh on startup');
+      this.refreshAccessToken();
     }
   }
 };

@@ -40,9 +40,6 @@ typedef struct {
   Window *playlists_window;
   Window *auth_window;
   bool is_authenticated;
-  char access_token[512];
-  char refresh_token[512];
-  time_t token_expires_at;
   char auth_error[128];
   
   // Now playing data
@@ -82,9 +79,6 @@ extern AppData s_app_data;
 // App state management functions
 void app_state_init(void);
 void app_state_deinit(void);
-void app_state_save_auth_data(void);
-void app_state_load_auth_data(void);
-void app_state_clear_auth_data(void);
 
 // Bitmap caching functions
 GBitmap* app_state_get_cached_bitmap(GBitmap **cached_bitmap, uint32_t resource_id);

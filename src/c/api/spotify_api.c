@@ -7,15 +7,10 @@
 void spotify_api_init(void) {
   app_message_register_inbox_received(spotify_api_app_message_handler);
   app_message_register_outbox_failed(spotify_api_app_message_outbox_failed);
-  app_message_register_outbox_sent(spotify_api_app_message_outbox_sent);
   
   const uint32_t inbox_size = INBOX_SIZE;
   const uint32_t outbox_size = OUTBOX_SIZE;
   app_message_open(inbox_size, outbox_size);
-}
-
-void spotify_api_deinit(void) {
-  // AppMessage cleanup is handled automatically
 }
 
 void spotify_api_make_call(const char *path, const char *method, const char *data) {
@@ -88,11 +83,6 @@ void spotify_api_volume_down(void) {
   dict_write_cstring(iter, MESSAGE_KEY_ACTION, "volume_down");
   
   app_message_outbox_send();
-}
-
-void spotify_api_set_volume(int volume_percent, ButtonId button) {
-  // Deprecated - use spotify_api_volume_up/down instead
-  s_app_data.volume_error_button = button;
 }
 
 void spotify_api_handle_response(DictionaryIterator *iter) {
@@ -221,8 +211,4 @@ void spotify_api_app_message_handler(DictionaryIterator *iter, void *context) {
 void spotify_api_app_message_outbox_failed(DictionaryIterator *iter, AppMessageResult reason, void *context) {
   s_app_data.auth_state = AUTH_STATE_ERROR;
   strcpy(s_app_data.auth_error, "Failed to send message");
-}
-
-void spotify_api_app_message_outbox_sent(DictionaryIterator *iter, void *context) {
-  // Message sent successfully
 }
