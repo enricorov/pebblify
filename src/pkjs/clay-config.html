@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Pebblify - Spotify Authentication</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo {
+            width: 64px;
+            height: 64px;
+            background: #1db954;
+            border-radius: 50%;
+            margin: 0 auto 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+        }
+        h1 {
+            color: #333;
+            margin: 0;
+            font-size: 24px;
+        }
+        .subtitle {
+            color: #666;
+            margin: 5px 0 0;
+            font-size: 14px;
+        }
+        .auth-section {
+            text-align: center;
+            margin: 30px 0;
+        }
+        .auth-button {
+            background: #1db954;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .auth-button:hover {
+            background: #1ed760;
+        }
+        .auth-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: 500;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        .instructions {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .instructions h3 {
+            margin-top: 0;
+            color: #495057;
+        }
+        .instructions ol {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+        .instructions li {
+            margin: 5px 0;
+            color: #6c757d;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">♪</div>
+            <h1>Pebblify</h1>
+            <p class="subtitle">Spotify for Pebble</p>
+        </div>
+
+        <div class="instructions">
+            <h3>Setup Instructions</h3>
+            <ol>
+                <li>Click "Authenticate with Spotify" below</li>
+                <li>Log in to your Spotify account</li>
+                <li>Authorize Pebblify to access your Spotify data</li>
+                <li>You'll be redirected back here automatically</li>
+            </ol>
+        </div>
+
+        <div class="auth-section">
+            <button id="authButton" class="auth-button" onclick="startAuthentication()">
+                Authenticate with Spotify
+            </button>
+            <div id="status" class="status hidden"></div>
+        </div>
+
+        <div id="successSection" class="hidden">
+            <div class="status success">
+                ✓ Authentication successful! You can now close this window and use Pebblify on your watch.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Get URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const code = urlParams.get('code');
+        const error = urlParams.get('error');
+        const state = urlParams.get('state');
+
+        // Check if we're returning from Spotify authorization
+        if (code) {
+            handleAuthCallback(code, state);
+        } else if (error) {
+            showStatus('Authentication was cancelled or failed: ' + error, 'error');
+        }
+
+        function startAuthentication() {
+            const button = document.getElementById('authButton');
+            button.disabled = true;
+            button.textContent = 'Redirecting to Spotify...';
+            
+            showStatus('Redirecting to Spotify for authentication...', 'info');
+            
+            // Generate a unique state parameter for security
+            const state = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+            localStorage.setItem('spotify_auth_state', state);
+            
+            // Build Spotify authorization URL
+            const clientId = '152d31f9089d4be0b6605671dae99c3f';
+            const redirectUri = window.location.origin + window.location.pathname;
+            const scope = 'user-read-playback-state user-modify-playback-state user-read-currently-playing';
+            
+            const authUrl = `https://accounts.spotify.com/authorize?` +
+                `response_type=code&` +
+                `client_id=${encodeURIComponent(clientId)}&` +
+                `scope=${encodeURIComponent(scope)}&` +
+                `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+                `state=${encodeURIComponent(state)}`;
+            
+            // Redirect to Spotify
+            window.location.href = authUrl;
+        }
+
+        function handleAuthCallback(code, returnedState) {
+            const storedState = localStorage.getItem('spotify_auth_state');
+            
+            if (!storedState || storedState !== returnedState) {
+                showStatus('Authentication failed: Invalid state parameter', 'error');
+                return;
+            }
+            
+            // Clear the stored state
+            localStorage.removeItem('spotify_auth_state');
+            
+            showStatus('Processing authentication...', 'info');
+            
+            // Send the authorization code back to the Pebble app
+            // This will be handled by the Pebble configuration system
+            const returnUrl = `pebblejs://close?code=${encodeURIComponent(code)}`;
+            
+            // Show success message
+            document.getElementById('successSection').classList.remove('hidden');
+            
+            // Redirect back to Pebble app
+            setTimeout(() => {
+                window.location.href = returnUrl;
+            }, 2000);
+        }
+
+        function showStatus(message, type) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+            statusDiv.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>

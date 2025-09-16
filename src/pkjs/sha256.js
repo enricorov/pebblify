@@ -1,6 +1,6 @@
 'use strict';
 
-const K = new Uint32Array([
+var K = new Uint32Array([
   0x428a2f98,
   0x71374491,
   0xb5c0fbcf,
@@ -68,10 +68,10 @@ const K = new Uint32Array([
 ]);
 
 function hashBlocks(w, v, p) {
-  let a, b, c, d, e, f, g, h, u, i, j, t1, t2;
+  var a, b, c, d, e, f, g, h, u, i, j, t1, t2;
 
-  let position = 0;
-  let length = p.length;
+  var position = 0;
+  var length = p.length;
 
   while (length >= 64) {
     a = v[0];
@@ -149,14 +149,14 @@ function hashBlocks(w, v, p) {
 }
 
 function buildPadding(data) {
-  const dataLength = data.length;
-  const trailerLength = dataLength % 64;
+  var dataLength = data.length;
+  var trailerLength = dataLength % 64;
 
-  const paddingLength = dataLength % 64 < 56 ? 64 : 128;
-  const padding = new Uint8Array(paddingLength);
+  var paddingLength = dataLength % 64 < 56 ? 64 : 128;
+  var padding = new Uint8Array(paddingLength);
 
-  const bitLenHi = (dataLength / 0x20000000) | 0;
-  const bitLenLo = dataLength << 3;
+  var bitLenHi = (dataLength / 0x20000000) | 0;
+  var bitLenLo = dataLength << 3;
 
   padding.set(data.subarray(dataLength - trailerLength));
 
@@ -175,8 +175,8 @@ function buildPadding(data) {
 }
 
 module.exports = function sha256(buffer) {
-  const state = new Int32Array(8);
-  const temp = new Int32Array(64);
+  var state = new Int32Array(8);
+  var temp = new Int32Array(64);
 
   state[0] = 0x6a09e667;
   state[1] = 0xbb67ae85;
@@ -187,15 +187,15 @@ module.exports = function sha256(buffer) {
   state[6] = 0x1f83d9ab;
   state[7] = 0x5be0cd19;
 
-  const data = new Uint8Array(buffer);
-  const padding = buildPadding(data);
+  var data = new Uint8Array(buffer);
+  var padding = buildPadding(data);
 
   hashBlocks(temp, state, data);
   hashBlocks(temp, state, padding);
 
-  const output = new Uint8Array(32);
+  var output = new Uint8Array(32);
 
-  for (let i = 0; i < 8; i++) {
+  for (var i = 0; i < 8; i++) {
     output[i * 4 + 0] = (state[i] >>> 24) & 0xff;
     output[i * 4 + 1] = (state[i] >>> 16) & 0xff;
     output[i * 4 + 2] = (state[i] >>> 8) & 0xff;

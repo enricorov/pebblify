@@ -1,12 +1,34 @@
 // Pebblify Authentication Module
-var SpotifyAuth = require('./auth.js');
-var NowPlayingManager = require('./now_playing.js');
+console.log('Pebblify JavaScript app started - basic test');
+
+// Provide configuration URL to pypkjs for emu-app-config
+if (typeof Pebble !== 'undefined' && Pebble.config) {
+  console.log('Setting up Pebble.config');
+  Pebble.config({
+    url: 'file:///home/rebble/dev/pebblify/src/pkjs/clay-config.html'
+  });
+  console.log('Pebble.config set successfully');
+} else {
+  console.log('Pebble.config not available');
+}
+
+// Basic module loading test
+try {
+  var SpotifyAuth = require('./auth.js');
+  var NowPlayingManager = require('./now_playing.js');
+  console.log('Modules loaded successfully');
+} catch (e) {
+  console.log('Module loading error:', e.message);
+}
 
 // Initialize the app
-console.log('Pebblify JavaScript app started');
-
-// Set up integration between auth and now playing
-var spotifyAuth = new SpotifyAuth();
+var spotifyAuth;
+try {
+  spotifyAuth = new SpotifyAuth();
+  console.log('SpotifyAuth initialized');
+} catch (e) {
+  console.log('SpotifyAuth error:', e.message);
+}
 
 // When authentication succeeds, start now playing polling
 Pebble.addEventListener('appmessage', function(e) {

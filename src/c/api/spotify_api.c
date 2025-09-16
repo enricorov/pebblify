@@ -232,7 +232,7 @@ void spotify_api_handle_error(DictionaryIterator *iter) {
 }
 
 void spotify_api_app_message_handler(DictionaryIterator *iter, void *context) {
-  // APP_LOG(APP_LOG_LEVEL_INFO, "C: Received message from JS");
+  APP_LOG(APP_LOG_LEVEL_INFO, "C: Received message from JS");
   
   // Check for different message types by looking at the keys
   Tuple *auth_success_tuple = dict_find(iter, MESSAGE_KEY_AUTH_SUCCESS);
@@ -240,23 +240,23 @@ void spotify_api_app_message_handler(DictionaryIterator *iter, void *context) {
   Tuple *api_response_tuple = dict_find(iter, MESSAGE_KEY_API_RESPONSE);
   Tuple *api_error_tuple = dict_find(iter, MESSAGE_KEY_API_ERROR);
   
-  // APP_LOG(APP_LOG_LEVEL_INFO, "Message received - auth_success: %d, auth_error: %d, api_response: %d, api_error: %d", 
-  //         auth_success_tuple ? 1 : 0, auth_error_tuple ? 1 : 0, api_response_tuple ? 1 : 0, api_error_tuple ? 1 : 0);
+  APP_LOG(APP_LOG_LEVEL_INFO, "Message received - auth_success: %d, auth_error: %d, api_response: %d, api_error: %d", 
+          auth_success_tuple ? 1 : 0, auth_error_tuple ? 1 : 0, api_response_tuple ? 1 : 0, api_error_tuple ? 1 : 0);
   
   if (auth_success_tuple) {
-    // APP_LOG(APP_LOG_LEVEL_INFO, "Calling handle_auth_success");
+    APP_LOG(APP_LOG_LEVEL_INFO, "Calling handle_auth_success");
     auth_handle_success(iter);
   } else if (auth_error_tuple) {
-    // APP_LOG(APP_LOG_LEVEL_INFO, "Calling handle_auth_error");
+    APP_LOG(APP_LOG_LEVEL_INFO, "Calling handle_auth_error");
     auth_handle_error(iter);
   } else if (api_response_tuple) {
-    // APP_LOG(APP_LOG_LEVEL_INFO, "Handling API response");
+    APP_LOG(APP_LOG_LEVEL_INFO, "Handling API response");
     spotify_api_handle_response(iter);
   } else if (api_error_tuple) {
-    // APP_LOG(APP_LOG_LEVEL_INFO, "Handling API error");
+    APP_LOG(APP_LOG_LEVEL_INFO, "Handling API error");
     spotify_api_handle_error(iter);
   } else {
-    // APP_LOG(APP_LOG_LEVEL_INFO, "Unknown message type received");
+    APP_LOG(APP_LOG_LEVEL_INFO, "Unknown message type received");
   }
 }
 

@@ -101,15 +101,14 @@ NowPlayingManager.prototype.setupAppMessageHandlers = function() {
  * Sends track data to C side when changes are detected
  */
 NowPlayingManager.prototype.sendNowPlayingData = function(data) {
-  var message = {
-    [messageKeys.API_RESPONSE]: 1,
-    [messageKeys.TRACK_NAME]: data.trackName,
-    [messageKeys.ARTIST_NAME]: data.artistName,
-    [messageKeys.IS_PLAYING]: data.isPlaying ? 1 : 0,
-    [messageKeys.VOLUME_PERCENT]: data.volumePercent,
-    [messageKeys.CAN_SKIP_PREV]: data.canSkipPrev ? 1 : 0,
-    [messageKeys.CAN_SKIP_NEXT]: data.canSkipNext ? 1 : 0
-  };
+  var message = {};
+  message[messageKeys.API_RESPONSE] = 1;
+  message[messageKeys.TRACK_NAME] = data.trackName;
+  message[messageKeys.ARTIST_NAME] = data.artistName;
+  message[messageKeys.IS_PLAYING] = data.isPlaying ? 1 : 0;
+  message[messageKeys.VOLUME_PERCENT] = data.volumePercent;
+  message[messageKeys.CAN_SKIP_PREV] = data.canSkipPrev ? 1 : 0;
+  message[messageKeys.CAN_SKIP_NEXT] = data.canSkipNext ? 1 : 0;
   
   Pebble.sendAppMessage(message, function() {
     // Success callback - data sent to C
@@ -122,10 +121,9 @@ NowPlayingManager.prototype.sendNowPlayingData = function(data) {
  * Sends error messages to C side
  */
 NowPlayingManager.prototype.sendError = function(errorMessage) {
-  var message = {
-    [messageKeys.API_ERROR]: 1,
-    [messageKeys.ERROR_MESSAGE]: errorMessage
-  };
+  var message = {};
+  message[messageKeys.API_ERROR] = 1;
+  message[messageKeys.ERROR_MESSAGE] = errorMessage;
   
   Pebble.sendAppMessage(message, function() {
     // Error message sent to C

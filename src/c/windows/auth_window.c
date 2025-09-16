@@ -174,12 +174,18 @@ void auth_handle_success(DictionaryIterator *iter) {
 }
 
 void auth_handle_error(DictionaryIterator *iter) {
+  APP_LOG(APP_LOG_LEVEL_ERROR, "Auth error received from JavaScript");
   s_app_data.auth_state = AUTH_STATE_ERROR;
   
   Tuple *error_tuple = dict_find(iter, MESSAGE_KEY_ERROR_MESSAGE);
   if (error_tuple) {
     strncpy(s_app_data.auth_error, error_tuple->value->cstring, sizeof(s_app_data.auth_error) - 1);
+    APP_LOG(APP_LOG_LEVEL_ERROR, "Auth error message: %s", s_app_data.auth_error);
+  } else {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "No error message found in auth error");
+    strcpy(s_app_data.auth_error, "Authentication failed");
   }
   
-  // TODO: Show error message to user
+  // TODO: Show error message to user (need to implement proper UI layer management)
+  APP_LOG(APP_LOG_LEVEL_ERROR, "Authentication failed - user should see error on screen");
 }
