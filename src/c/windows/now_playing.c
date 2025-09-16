@@ -462,8 +462,12 @@ void now_playing_update_clock(void) {
   if (s_app_data.now_playing_window && window_stack_get_top_window() == s_app_data.now_playing_window) {
     if (s_clock_timer) {
       app_timer_cancel(s_clock_timer);
+      s_clock_timer = NULL;
     }
     s_clock_timer = app_timer_register(CLOCK_UPDATE_INTERVAL_MS, (AppTimerCallback)now_playing_update_clock, NULL);
+  } else {
+    // Window is no longer active, clear timer pointer
+    s_clock_timer = NULL;
   }
 }
 
@@ -494,6 +498,9 @@ void now_playing_show_volume_error(ButtonId button) {
   if (s_app_data.now_playing_window && window_stack_get_top_window() == s_app_data.now_playing_window) {
     s_app_data.volume_error_timer = app_timer_register(VOLUME_ERROR_DISPLAY_MS, 
                                                        (AppTimerCallback)now_playing_clear_volume_error, NULL);
+  } else {
+    // Window is no longer active, clear timer pointer
+    s_app_data.volume_error_timer = NULL;
   }
 }
 
