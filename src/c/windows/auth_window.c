@@ -15,7 +15,7 @@ void auth_window_deinit(void) {
 
 void auth_window_create(void) {
   if (s_app_data.auth_window) {
-    return; // Already exists
+    return;
   }
   
   s_app_data.auth_window = window_create();
@@ -38,10 +38,8 @@ void auth_window_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
   
-  // Set up click recognizer
   window_set_click_config_provider(window, auth_click_config_provider);
   
-  // Create text layers for authentication UI
   TextLayer *title_layer = text_layer_create(GRect(MARGIN_MEDIUM, MARGIN_LARGE, bounds.size.w - MARGIN_LARGE, TITLE_HEIGHT));
   text_layer_set_text_alignment(title_layer, GTextAlignmentCenter);
   text_layer_set_font(title_layer, fonts_get_system_font(FONT_KEY_TITLE));
@@ -66,7 +64,6 @@ void auth_window_load(Window *window) {
   text_layer_set_text(instruction_layer, DEFAULT_AUTH_INSTRUCTION_TEXT);
   layer_add_child(window_layer, text_layer_get_layer(instruction_layer));
   
-  // Set background color using compile-time macros
   window_set_background_color(window, AUTH_BACKGROUND_COLOR);
 }
 
@@ -86,24 +83,19 @@ void auth_click_handler(ClickRecognizerRef recognizer, void *context) {
 void auth_request_authentication(void) {
   s_app_data.auth_state = AUTH_STATE_REQUESTING;
   
-  // Send authentication request to JavaScript companion
   DictionaryIterator *iter;
   app_message_outbox_begin(&iter);
   
-  // Send message_type as a string key with integer value
   dict_write_uint8(iter, MESSAGE_KEY_AUTH_REQUEST, 0);
   
-  // APP_LOG(APP_LOG_LEVEL_INFO, "C->JS: Sending AUTH_REQUEST message");
   app_message_outbox_send();
 }
 
 void auth_handle_success(DictionaryIterator *iter) {
-  // APP_LOG(APP_LOG_LEVEL_INFO, "C: Received AUTH_SUCCESS message from JS");
   APP_LOG(APP_LOG_LEVEL_INFO, "Authentication successful, switching to main menu");
   s_app_data.auth_state = AUTH_STATE_AUTHENTICATED;
   s_app_data.is_authenticated = true;
   
-  // Extract tokens from message using the correct message key constants
   Tuple *access_token_tuple = dict_find(iter, MESSAGE_KEY_ACCESS_TOKEN);
   Tuple *refresh_token_tuple = dict_find(iter, MESSAGE_KEY_REFRESH_TOKEN);
   Tuple *expires_at_tuple = dict_find(iter, MESSAGE_KEY_EXPIRES_AT);
@@ -115,7 +107,6 @@ void auth_handle_success(DictionaryIterator *iter) {
     strncpy(new_access_token, access_token_tuple->value->cstring, sizeof(new_access_token) - 1);
     new_access_token[sizeof(new_access_token) - 1] = '\0';
     
-    // Compare with existing token
     if (strcmp(s_app_data.access_token, new_access_token) != 0) {
       strncpy(s_app_data.access_token, new_access_token, sizeof(s_app_data.access_token) - 1);
       s_app_data.access_token[sizeof(s_app_data.access_token) - 1] = '\0';
@@ -133,7 +124,6 @@ void auth_handle_success(DictionaryIterator *iter) {
     strncpy(new_refresh_token, refresh_token_tuple->value->cstring, sizeof(new_refresh_token) - 1);
     new_refresh_token[sizeof(new_refresh_token) - 1] = '\0';
     
-    // Compare with existing token
     if (strcmp(s_app_data.refresh_token, new_refresh_token) != 0) {
       strncpy(s_app_data.refresh_token, new_refresh_token, sizeof(s_app_data.refresh_token) - 1);
       s_app_data.refresh_token[sizeof(s_app_data.refresh_token) - 1] = '\0';
@@ -159,7 +149,6 @@ void auth_handle_success(DictionaryIterator *iter) {
     APP_LOG(APP_LOG_LEVEL_ERROR, "No expiration time received");
   }
   
-  // Only save to persistent storage if tokens actually changed
   if (tokens_changed) {
     APP_LOG(APP_LOG_LEVEL_INFO, "Tokens changed, saving to persistent storage");
     app_state_save_auth_data();
@@ -167,14 +156,11 @@ void auth_handle_success(DictionaryIterator *iter) {
     APP_LOG(APP_LOG_LEVEL_INFO, "Tokens unchanged, skipping persistent storage update");
   }
   
-  // Pop the auth window
   auth_window_destroy();
   
-  // Show now playing screen directly after authentication
   s_app_data.current_state = APP_STATE_NOW_PLAYING;
   now_playing_window_create();
   
-  // Refresh now playing data after successful authentication
   spotify_api_refresh_now_playing();
 }
 

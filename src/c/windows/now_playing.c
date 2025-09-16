@@ -1,16 +1,12 @@
 /**
- * Now Playing Window Module for Pebblify
+ * Now Playing Window Module
  * 
- * This module handles the C side of the now playing interface:
+ * Handles the now playing interface:
  * - Creates and manages the now playing window UI
  * - Handles button interactions and sends action commands to JavaScript
  * - Updates display based on track data received from JavaScript
  * - Provides visual feedback for volume errors
- * - Manages polling control (start/stop) via AppMessage to JavaScript
- * 
- * Communication Flow:
- * C → JS: START_POLLING, STOP_POLLING, ACTION commands
- * JS → C: Track data updates via spotify_api_handle_response()
+ * - Manages polling control via AppMessage to JavaScript
  */
 
 #include "now_playing.h"
@@ -18,9 +14,7 @@
 #include "../core/app_state.h"
 #include "../core/constants.h"
 
-// ============================================================================
 // UI Layer Management
-// ============================================================================
 
 static TextLayer *s_track_layer;
 static TextLayer *s_artist_layer;
@@ -29,12 +23,9 @@ static ActionBarLayer *s_action_bar_layer;
 static AppTimer *s_clock_timer;
 static AppTimer *s_action_feedback_timer;
 
-// ============================================================================
 // Module Initialization and Cleanup
-// ============================================================================
 
 void now_playing_init(void) {
-  // Initialize now playing data with default values
   s_app_data.is_active_session = false;
   strncpy(s_app_data.track_name, DEFAULT_NO_SESSION_TEXT, sizeof(s_app_data.track_name) - 1);
   s_app_data.track_name[sizeof(s_app_data.track_name) - 1] = '\0';
@@ -50,18 +41,14 @@ void now_playing_deinit(void) {
   now_playing_window_destroy();
 }
 
-// ============================================================================
 // Window Management
-// ============================================================================
 
 void now_playing_window_create(void) {
-  // Reuse existing window if it exists
   if (s_app_data.now_playing_window) {
     window_stack_push(s_app_data.now_playing_window, true);
     return;
   }
   
-  // Create new window
   s_app_data.now_playing_window = window_create();
   window_set_window_handlers(s_app_data.now_playing_window, (WindowHandlers) {
     .load = now_playing_window_load,
@@ -73,13 +60,11 @@ void now_playing_window_create(void) {
 
 void now_playing_window_pop(void) {
   if (s_app_data.now_playing_window && window_stack_get_top_window() == s_app_data.now_playing_window) {
-    // Stop JavaScript polling
     DictionaryIterator *iter;
     app_message_outbox_begin(&iter);
     dict_write_uint8(iter, MESSAGE_KEY_STOP_POLLING, 1);
     app_message_outbox_send();
     
-    // Clean up timers
     if (s_clock_timer) {
       app_timer_cancel(s_clock_timer);
       s_clock_timer = NULL;
@@ -93,8 +78,6 @@ void now_playing_window_pop(void) {
       s_app_data.volume_error_timer = NULL;
     }
     
-    // Long click handlers are automatically cleaned up when window is destroyed
-    
     window_stack_pop(true);
     s_app_data.current_state = APP_STATE_MAIN_MENU;
   }
@@ -102,7 +85,6 @@ void now_playing_window_pop(void) {
 
 void now_playing_window_destroy(void) {
   if (s_app_data.now_playing_window) {
-    // Remove from window stack if still active
     if (window_stack_get_top_window() == s_app_data.now_playing_window) {
       window_stack_pop(true);
     }
@@ -113,26 +95,21 @@ void now_playing_window_destroy(void) {
   }
 }
 
-// ============================================================================
 // Window Lifecycle Handlers
-// ============================================================================
 
 void now_playing_window_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
   
-  // Create ActionBarLayer for button controls
   s_action_bar_layer = action_bar_layer_create();
   action_bar_layer_set_click_config_provider(s_action_bar_layer, now_playing_click_config_provider);
   
-  // Set button press animations for better user feedback
   action_bar_layer_set_icon_press_animation(s_action_bar_layer, BUTTON_ID_UP, ActionBarLayerIconPressAnimationMoveLeft);
   action_bar_layer_set_icon_press_animation(s_action_bar_layer, BUTTON_ID_SELECT, ActionBarLayerIconPressAnimationMoveLeft);
   action_bar_layer_set_icon_press_animation(s_action_bar_layer, BUTTON_ID_DOWN, ActionBarLayerIconPressAnimationMoveLeft);
   
   action_bar_layer_add_to_window(s_action_bar_layer, window);
   
-  // Create clock display at bottom
   s_clock_layer = text_layer_create(GRect(MARGIN_MEDIUM, bounds.size.h - CLOCK_HEIGHT - MARGIN_SMALL, 
                                           bounds.size.w - ACTION_BAR_WIDTH - MARGIN_LARGE, CLOCK_HEIGHT));
   text_layer_set_text_alignment(s_clock_layer, GTextAlignmentCenter);
@@ -141,21 +118,17 @@ void now_playing_window_load(Window *window) {
   text_layer_set_background_color(s_clock_layer, GColorClear);
   layer_add_child(window_layer, text_layer_get_layer(s_clock_layer));
   
-  // Create text layers for track information
   GFont track_font = fonts_get_system_font(FONT_KEY_TRACK);
   GFont artist_font = fonts_get_system_font(FONT_KEY_ARTIST);
   
-  // Calculate dynamic heights based on text content
   int track_height = now_playing_calculate_text_height(s_app_data.track_name, track_font, 
                                                       bounds.size.w - ACTION_BAR_WIDTH - MARGIN_LARGE);
   int artist_height = now_playing_calculate_text_height(s_app_data.artist_name, artist_font, 
                                                        bounds.size.w - ACTION_BAR_WIDTH - MARGIN_LARGE);
   
-  // Ensure minimum heights
   if (track_height < MIN_TRACK_HEIGHT) track_height = MIN_TRACK_HEIGHT;
   if (artist_height < MIN_ARTIST_HEIGHT) artist_height = MIN_ARTIST_HEIGHT;
   
-  // Track name layer
   s_track_layer = text_layer_create(GRect(MARGIN_MEDIUM, MARGIN_SMALL, 
                                           bounds.size.w - ACTION_BAR_WIDTH - MARGIN_LARGE, track_height));
   text_layer_set_text_alignment(s_track_layer, GTextAlignmentCenter);
@@ -165,7 +138,6 @@ void now_playing_window_load(Window *window) {
   text_layer_set_overflow_mode(s_track_layer, GTextOverflowModeWordWrap);
   layer_add_child(window_layer, text_layer_get_layer(s_track_layer));
   
-  // Artist name layer
   s_artist_layer = text_layer_create(GRect(MARGIN_MEDIUM, MARGIN_MEDIUM + track_height, 
                                            bounds.size.w - ACTION_BAR_WIDTH - MARGIN_LARGE, artist_height));
   text_layer_set_text_alignment(s_artist_layer, GTextAlignmentCenter);
@@ -175,14 +147,11 @@ void now_playing_window_load(Window *window) {
   text_layer_set_overflow_mode(s_artist_layer, GTextOverflowModeWordWrap);
   layer_add_child(window_layer, text_layer_get_layer(s_artist_layer));
   
-  // Set window background color
   window_set_background_color(window, PBL_IF_COLOR_ELSE(GColorBlack, GColorWhite));
   
-  // Initialize display
   now_playing_update_display();
   now_playing_update_clock();
   
-  // Start JavaScript polling if authenticated
   if (s_app_data.is_authenticated) {
     DictionaryIterator *iter;
     app_message_outbox_begin(&iter);
@@ -192,13 +161,11 @@ void now_playing_window_load(Window *window) {
 }
 
 void now_playing_window_unload(Window *window) {
-  // Stop JavaScript polling
   DictionaryIterator *iter;
   app_message_outbox_begin(&iter);
   dict_write_uint8(iter, MESSAGE_KEY_STOP_POLLING, 1);
   app_message_outbox_send();
   
-  // Clean up timers safely
   if (s_clock_timer) {
     app_timer_cancel(s_clock_timer);
     s_clock_timer = NULL;
@@ -212,9 +179,6 @@ void now_playing_window_unload(Window *window) {
     s_app_data.volume_error_timer = NULL;
   }
   
-  // Long click handlers are automatically cleaned up when window is destroyed
-  
-  // Clean up UI layers
   if (s_track_layer) {
     text_layer_destroy(s_track_layer);
     s_track_layer = NULL;
@@ -233,17 +197,13 @@ void now_playing_window_unload(Window *window) {
   }
 }
 
-// ============================================================================
 // Button Interaction Handlers
-// ============================================================================
 
 void now_playing_click_config_provider(void *context) {
-  // Single clicks for volume and play/pause
   window_single_click_subscribe(BUTTON_ID_UP, now_playing_click_handler);
   window_single_click_subscribe(BUTTON_ID_SELECT, now_playing_click_handler);
   window_single_click_subscribe(BUTTON_ID_DOWN, now_playing_click_handler);
   
-  // Long clicks for track navigation and main menu
   window_long_click_subscribe(BUTTON_ID_UP, LONG_CLICK_DURATION_MS, now_playing_long_click_handler, NULL);
   window_long_click_subscribe(BUTTON_ID_SELECT, LONG_CLICK_DURATION_MS, now_playing_long_click_handler, NULL);
   window_long_click_subscribe(BUTTON_ID_DOWN, LONG_CLICK_DURATION_MS, now_playing_long_click_handler, NULL);
@@ -257,9 +217,7 @@ void now_playing_click_handler(ClickRecognizerRef recognizer, void *context) {
 void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *context) {
   ButtonId button = click_recognizer_get_button_id(recognizer);
   
-  // Handle SELECT button for main menu
   if (button == BUTTON_ID_SELECT) {
-    // Show main menu on top of now playing window
     s_app_data.current_state = APP_STATE_MAIN_MENU;
     if (s_app_data.main_window) {
       window_stack_push(s_app_data.main_window, true);
@@ -268,10 +226,9 @@ void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *context
   }
   
   if (!s_app_data.is_active_session) {
-    return; // No action when no active session
+    return;
   }
   
-  // Show navigation icons for long press feedback
   if (s_action_bar_layer) {
     switch (button) {
       case BUTTON_ID_UP:
@@ -297,7 +254,6 @@ void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *context
     }
   }
   
-  // Perform track navigation
   switch (button) {
     case BUTTON_ID_UP:
       if (s_app_data.can_skip_prev) {
@@ -313,16 +269,13 @@ void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *context
       break;
   }
   
-  // Restore original icons after action feedback only if window is still active
   if (s_app_data.now_playing_window && window_stack_get_top_window() == s_app_data.now_playing_window && !s_action_feedback_timer) {
-    // Only create timer if one doesn't already exist
     s_action_feedback_timer = app_timer_register(ACTION_FEEDBACK_DELAY_MS, (AppTimerCallback)now_playing_update_display, NULL);
   }
 }
 
 void now_playing_handle_action(ButtonId button) {
   if (!s_app_data.is_active_session) {
-    // Show helpful message when no active session
     strncpy(s_app_data.track_name, DEFAULT_NO_ACTIVE_SESSION_TEXT, sizeof(s_app_data.track_name) - 1);
     s_app_data.track_name[sizeof(s_app_data.track_name) - 1] = '\0';
     strncpy(s_app_data.artist_name, DEFAULT_START_MUSIC_TEXT, sizeof(s_app_data.artist_name) - 1);
@@ -331,10 +284,8 @@ void now_playing_handle_action(ButtonId button) {
     return;
   }
   
-  // Update display before handling action
   now_playing_update_display();
   
-  // Handle button actions: UP=Volume Up, SELECT=Play/Pause, DOWN=Volume Down
   switch (button) {
     case BUTTON_ID_UP:
       spotify_api_volume_up();
@@ -350,28 +301,22 @@ void now_playing_handle_action(ButtonId button) {
   }
 }
 
-// ============================================================================
 // Display Management
-// ============================================================================
 
 void now_playing_update_display(void) {
   if (!s_app_data.now_playing_window || window_stack_get_top_window() != s_app_data.now_playing_window) {
-    // Clear the timer since we're not updating
     s_action_feedback_timer = NULL;
     return;
   }
   
-  // Determine text content based on session state
   const char *track_text = s_app_data.is_active_session ? s_app_data.track_name : DEFAULT_NO_ACTIVE_SESSION_TEXT;
   const char *artist_text = s_app_data.is_active_session ? s_app_data.artist_name : DEFAULT_START_MUSIC_TEXT;
   
-  // Get window bounds for layout calculations
   Layer *window_layer = window_get_root_layer(s_app_data.now_playing_window);
   if (!window_layer) return;
   
   GRect bounds = layer_get_bounds(window_layer);
   
-  // Calculate dynamic heights for text content
   GFont track_font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
   GFont artist_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
 
@@ -380,12 +325,10 @@ void now_playing_update_display(void) {
   int artist_height = now_playing_calculate_text_height(artist_text, artist_font, 
                                                        bounds.size.w - ACTION_BAR_WIDTH - 20);
 
-  // Ensure minimum heights
   if (track_height < MIN_TRACK_HEIGHT) track_height = MIN_TRACK_HEIGHT;
   if (artist_height < MIN_ARTIST_HEIGHT) artist_height = MIN_ARTIST_HEIGHT;
 
-  // Apply height limits to prevent text overflow
-  int max_track_height = bounds.size.h - 80; // Reserve space for artist + clock + margins
+  int max_track_height = bounds.size.h - 80;
   if (track_height > max_track_height) {
     track_height = max_track_height;
     text_layer_set_overflow_mode(s_track_layer, GTextOverflowModeFill);
@@ -401,7 +344,6 @@ void now_playing_update_display(void) {
     text_layer_set_overflow_mode(s_artist_layer, GTextOverflowModeWordWrap);
   }
   
-  // Update track text layer
   if (s_track_layer) {
     layer_set_frame(text_layer_get_layer(s_track_layer), 
                    GRect(10, 5, bounds.size.w - ACTION_BAR_WIDTH - 20, track_height));
@@ -409,7 +351,6 @@ void now_playing_update_display(void) {
     text_layer_set_text_color(s_track_layer, PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack));
   }
 
-  // Update artist text layer
   if (s_artist_layer) {
     layer_set_frame(text_layer_get_layer(s_artist_layer), 
                    GRect(10, 10 + track_height, bounds.size.w - ACTION_BAR_WIDTH - 20, artist_height));
@@ -417,15 +358,12 @@ void now_playing_update_display(void) {
     text_layer_set_text_color(s_artist_layer, PBL_IF_COLOR_ELSE(GColorLightGray, GColorDarkGray));
   }
   
-  // Update ActionBarLayer icons (skip if showing volume error)
   if (s_action_bar_layer && !s_app_data.showing_volume_error) {
     if (!s_app_data.is_active_session) {
-      // Clear all icons when no active session
       action_bar_layer_set_icon(s_action_bar_layer, BUTTON_ID_UP, NULL);
       action_bar_layer_set_icon(s_action_bar_layer, BUTTON_ID_SELECT, NULL);
       action_bar_layer_set_icon(s_action_bar_layer, BUTTON_ID_DOWN, NULL);
     } else {
-      // Set icons: Volume Up, Play/Pause, Volume Down
       GBitmap *vol_up_bitmap = app_state_get_cached_bitmap(&s_app_data.cached_vol_up_bitmap, 
                                                           RESOURCE_ID_IMAGE_MUSIC_ICON_VOLUME_UP);
       GBitmap *play_pause_bitmap = app_state_get_cached_bitmap(
@@ -440,7 +378,6 @@ void now_playing_update_display(void) {
     }
   }
   
-  // Clear the action feedback timer since we've completed the update
   s_action_feedback_timer = NULL;
 }
 
@@ -450,7 +387,6 @@ void now_playing_update_clock(void) {
     return;
   }
   
-  // Update clock display
   time_t now = time(NULL);
   struct tm *tick_time = localtime(&now);
   
@@ -458,7 +394,6 @@ void now_playing_update_clock(void) {
   strftime(clock_text, sizeof(clock_text), "%H:%M", tick_time);
   text_layer_set_text(s_clock_layer, clock_text);
   
-  // Schedule next update only if window is still active
   if (s_app_data.now_playing_window && window_stack_get_top_window() == s_app_data.now_playing_window) {
     if (s_clock_timer) {
       app_timer_cancel(s_clock_timer);
@@ -466,40 +401,32 @@ void now_playing_update_clock(void) {
     }
     s_clock_timer = app_timer_register(CLOCK_UPDATE_INTERVAL_MS, (AppTimerCallback)now_playing_update_clock, NULL);
   } else {
-    // Window is no longer active, clear timer pointer
     s_clock_timer = NULL;
   }
 }
 
-// ============================================================================
 // Volume Error Feedback
-// ============================================================================
 
 void now_playing_show_volume_error(ButtonId button) {
   if (!s_action_bar_layer) return;
   
-  // Cancel any existing error timer
   if (s_app_data.volume_error_timer) {
     app_timer_cancel(s_app_data.volume_error_timer);
     s_app_data.volume_error_timer = NULL;
   }
   
-  // Set error flag to prevent display updates
   s_app_data.showing_volume_error = true;
   
-  // Show dismiss icon as error indicator
   GBitmap *error_bitmap = app_state_get_cached_bitmap(&s_app_data.cached_dismiss_bitmap, 
                                                       RESOURCE_ID_IMAGE_ICON_DISMISS);
   if (error_bitmap) {
     action_bar_layer_set_icon(s_action_bar_layer, button, error_bitmap);
   }
   
-  // Clear error after timeout only if window is still active
   if (s_app_data.now_playing_window && window_stack_get_top_window() == s_app_data.now_playing_window) {
     s_app_data.volume_error_timer = app_timer_register(VOLUME_ERROR_DISPLAY_MS, 
                                                        (AppTimerCallback)now_playing_clear_volume_error, NULL);
   } else {
-    // Window is no longer active, clear timer pointer
     s_app_data.volume_error_timer = NULL;
   }
 }
@@ -511,32 +438,26 @@ void now_playing_clear_volume_error(void) {
     return;
   }
   
-  // Clear error flag and restore normal display
   s_app_data.showing_volume_error = false;
   now_playing_update_display();
   s_app_data.volume_error_timer = NULL;
 }
 
-// ============================================================================
 // Utility Functions
-// ============================================================================
 
 int now_playing_calculate_text_height(const char *text, GFont font, int width) {
   if (!text || strlen(text) == 0) {
-    return TEXT_PADDING * 4; // Default height for empty text
+    return TEXT_PADDING * 4;
   }
 
-  // Calculate height needed for text with word wrapping
   GRect bounds = GRect(0, 0, width, MAX_TEXT_HEIGHT);
   GSize text_size = graphics_text_layout_get_content_size(text, font, bounds, 
                                                          GTextOverflowModeWordWrap, GTextAlignmentCenter);
 
-  return text_size.h + TEXT_PADDING; // Add padding
+  return text_size.h + TEXT_PADDING;
 }
 
-// ============================================================================
 // Deprecated Functions (Legacy Compatibility)
-// ============================================================================
 
 void now_playing_request_volume_change(ButtonId button, int delta) {
   // Deprecated - volume changes now handled via JavaScript

@@ -8,16 +8,11 @@ extern void now_playing_window_create(void);
 extern void click_config_provider(void *context);
 
 void main_menu_init(void) {
-  // Create main window
   s_app_data.main_window = window_create();
   window_set_window_handlers(s_app_data.main_window, (WindowHandlers) {
     .load = main_menu_load,
     .unload = main_menu_unload,
   });
-  
-  // Note: Menu layer handles its own click configuration
-  // Back button behavior is handled by the system when no custom handler is set
-  // Window will be pushed to stack when needed (e.g., from now playing screen)
 }
 
 void main_menu_deinit(void) {
@@ -32,7 +27,6 @@ void main_menu_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
   
-  // Create main menu
   MenuLayer *main_menu = menu_layer_create(bounds);
   menu_layer_set_callbacks(main_menu, NULL, (MenuLayerCallbacks) {
     .get_num_sections = main_menu_get_num_sections_callback,
@@ -43,15 +37,12 @@ void main_menu_load(Window *window) {
     .select_click = main_menu_select_callback,
   });
   
-  // Let MenuLayer handle its own click configuration
   menu_layer_set_click_config_onto_window(main_menu, window);
   
-  // Set colors using compile-time macros
   menu_layer_set_highlight_colors(main_menu, 
     PBL_IF_COLOR_ELSE(GColorJaegerGreen, GColorBlack),
     PBL_IF_COLOR_ELSE(GColorWhite, GColorWhite));
   
-  // Set window background color using compile-time macros
   window_set_background_color(window, PBL_IF_COLOR_ELSE(GColorBlack, GColorWhite));
   
   layer_add_child(window_layer, menu_layer_get_layer(main_menu));
@@ -63,14 +54,14 @@ void main_menu_unload(Window *window) {
 }
 
 uint16_t main_menu_get_num_sections_callback(MenuLayer *menu_layer, void *data) {
-  return MAIN_MENU_SECTIONS; // Home, Library, Devices
+  return MAIN_MENU_SECTIONS;
 }
 
 uint16_t main_menu_get_num_rows_callback(MenuLayer *menu_layer, uint16_t section_index, void *data) {
   switch (section_index) {
-    case 0: return HOME_MENU_ROWS; // Home: Jump back in, Made for you
-    case 1: return LIBRARY_MENU_ROWS; // Library: Playlists, Albums, Artists
-    case 2: return DEVICES_MENU_ROWS; // Devices: Play on device
+    case 0: return HOME_MENU_ROWS;
+    case 1: return LIBRARY_MENU_ROWS;
+    case 2: return DEVICES_MENU_ROWS;
     default: return 0;
   }
 }
@@ -95,15 +86,11 @@ void main_menu_draw_row_callback(GContext *ctx, const Layer *cell_layer, MenuInd
 }
 
 void main_menu_select_callback(MenuLayer *menu_layer, MenuIndex *cell_index, void *data) {
-  // Handle menu selection
   if (cell_index->section == 0 && cell_index->row == 0) {
-    // Jump back in selected
     // TODO: Implement jump back in functionality
   } else if (cell_index->section == 0 && cell_index->row == 1) {
-    // Made for you selected
     // TODO: Implement made for you functionality
   } else if (cell_index->section == 1 && cell_index->row == 0) {
-    // Playlists selected
     s_app_data.current_state = APP_STATE_PLAYLISTS;
     // TODO: Show playlists window
   }

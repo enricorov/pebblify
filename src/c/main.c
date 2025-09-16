@@ -5,54 +5,38 @@
 #include "windows/now_playing.h"
 #include "api/spotify_api.h"
 
-// Global back button handler
 void back_button_handler(ClickRecognizerRef recognizer, void *context) {
-  // Handle back button based on current app state
   if (s_app_data.current_state == APP_STATE_NOW_PLAYING) {
-    // Pop the now playing window instead of destroying it
     now_playing_window_pop();
   } else if (s_app_data.current_state == APP_STATE_PLAYLISTS) {
     // TODO: Handle playlists back button
     s_app_data.current_state = APP_STATE_MAIN_MENU;
-  } else if (s_app_data.current_state == APP_STATE_MAIN_MENU) {
-    // On main menu, back button does nothing (user can navigate away from app)
-    // Pebble apps typically don't exit programmatically
   }
-  // For auth state, back button does nothing
+  // Auth state and main menu: back button does nothing
 }
 
 void click_config_provider(void *context) {
-  // Register back button handler
   window_single_click_subscribe(BUTTON_ID_BACK, back_button_handler);
 }
 
 int main(void) {
-  // Initialize all modules
   app_state_init();
   spotify_api_init();
   auth_window_init();
   now_playing_init();
-  
-  // Load authentication data from persistent storage
   app_state_load_auth_data();
-  
-  // Initialize main menu window (but don't show it yet)
   main_menu_init();
   
   if (s_app_data.auth_state == AUTH_STATE_AUTHENTICATED) {
-    // Authenticated - show now playing screen directly
     s_app_data.current_state = APP_STATE_NOW_PLAYING;
     now_playing_window_create();
   } else {
-    // Not authenticated - show auth window
     s_app_data.current_state = APP_STATE_AUTH_REQUIRED;
     auth_window_create();
   }
   
-  // Start the app event loop
   app_event_loop();
   
-  // Clean up all modules
   now_playing_deinit();
   auth_window_deinit();
   main_menu_deinit();
