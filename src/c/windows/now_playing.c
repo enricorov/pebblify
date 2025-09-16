@@ -243,8 +243,9 @@ void now_playing_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_SELECT, now_playing_click_handler);
   window_single_click_subscribe(BUTTON_ID_DOWN, now_playing_click_handler);
   
-  // Long clicks for track navigation
+  // Long clicks for track navigation and main menu
   window_long_click_subscribe(BUTTON_ID_UP, LONG_CLICK_DURATION_MS, now_playing_long_click_handler, NULL);
+  window_long_click_subscribe(BUTTON_ID_SELECT, LONG_CLICK_DURATION_MS, now_playing_long_click_handler, NULL);
   window_long_click_subscribe(BUTTON_ID_DOWN, LONG_CLICK_DURATION_MS, now_playing_long_click_handler, NULL);
 }
 
@@ -255,6 +256,16 @@ void now_playing_click_handler(ClickRecognizerRef recognizer, void *context) {
 
 void now_playing_long_click_handler(ClickRecognizerRef recognizer, void *context) {
   ButtonId button = click_recognizer_get_button_id(recognizer);
+  
+  // Handle SELECT button for main menu
+  if (button == BUTTON_ID_SELECT) {
+    // Show main menu on top of now playing window
+    s_app_data.current_state = APP_STATE_MAIN_MENU;
+    if (s_app_data.main_window) {
+      window_stack_push(s_app_data.main_window, true);
+    }
+    return;
+  }
   
   if (!s_app_data.is_active_session) {
     return; // No action when no active session

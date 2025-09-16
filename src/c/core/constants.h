@@ -78,7 +78,7 @@
 // Menu Configuration
 // ============================================================================
 #define MAIN_MENU_SECTIONS 3
-#define HOME_MENU_ROWS 3
+#define HOME_MENU_ROWS 2
 #define LIBRARY_MENU_ROWS 3
 #define DEVICES_MENU_ROWS 1
 

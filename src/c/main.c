@@ -30,18 +30,22 @@ int main(void) {
   // Initialize all modules
   app_state_init();
   spotify_api_init();
-  main_menu_init();
   auth_window_init();
   now_playing_init();
   
   // Load authentication data from persistent storage
   app_state_load_auth_data();
   
-  // Always create main window first (this will be the base layer)
-  s_app_data.current_state = APP_STATE_MAIN_MENU;
+  // Initialize main menu window (but don't show it yet)
+  main_menu_init();
   
-  if (s_app_data.auth_state != AUTH_STATE_AUTHENTICATED) {
-    // Not authenticated - create auth window on top of main window
+  if (s_app_data.auth_state == AUTH_STATE_AUTHENTICATED) {
+    // Authenticated - show now playing screen directly
+    s_app_data.current_state = APP_STATE_NOW_PLAYING;
+    now_playing_window_create();
+  } else {
+    // Not authenticated - show auth window
+    s_app_data.current_state = APP_STATE_AUTH_REQUIRED;
     auth_window_create();
   }
   

@@ -3,6 +3,7 @@
 #include "../core/app_state.h"
 #include "../core/constants.h"
 #include "message_keys.auto.h"
+#include "now_playing.h"
 
 void auth_window_init(void) {
   // Authentication window will be created when needed
@@ -166,8 +167,12 @@ void auth_handle_success(DictionaryIterator *iter) {
     APP_LOG(APP_LOG_LEVEL_INFO, "Tokens unchanged, skipping persistent storage update");
   }
   
-  // Pop the auth window (main menu is already underneath)
+  // Pop the auth window
   auth_window_destroy();
+  
+  // Show now playing screen directly after authentication
+  s_app_data.current_state = APP_STATE_NOW_PLAYING;
+  now_playing_window_create();
   
   // Refresh now playing data after successful authentication
   spotify_api_refresh_now_playing();

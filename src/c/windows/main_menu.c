@@ -17,8 +17,7 @@ void main_menu_init(void) {
   
   // Note: Menu layer handles its own click configuration
   // Back button behavior is handled by the system when no custom handler is set
-  
-  window_stack_push(s_app_data.main_window, true);
+  // Window will be pushed to stack when needed (e.g., from now playing screen)
 }
 
 void main_menu_deinit(void) {
@@ -29,7 +28,7 @@ void main_menu_deinit(void) {
 }
 
 void main_menu_load(Window *window) {
-  // APP_LOG(APP_LOG_LEVEL_INFO, "Main window load called");
+  APP_LOG(APP_LOG_LEVEL_INFO, "Main menu load called");
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
   
@@ -44,6 +43,7 @@ void main_menu_load(Window *window) {
     .select_click = main_menu_select_callback,
   });
   
+  // Let MenuLayer handle its own click configuration
   menu_layer_set_click_config_onto_window(main_menu, window);
   
   // Set colors using compile-time macros
@@ -68,7 +68,7 @@ uint16_t main_menu_get_num_sections_callback(MenuLayer *menu_layer, void *data) 
 
 uint16_t main_menu_get_num_rows_callback(MenuLayer *menu_layer, uint16_t section_index, void *data) {
   switch (section_index) {
-    case 0: return HOME_MENU_ROWS; // Home: Now playing, Jump back in, Made for you
+    case 0: return HOME_MENU_ROWS; // Home: Jump back in, Made for you
     case 1: return LIBRARY_MENU_ROWS; // Library: Playlists, Albums, Artists
     case 2: return DEVICES_MENU_ROWS; // Devices: Play on device
     default: return 0;
@@ -86,7 +86,7 @@ void main_menu_draw_header_callback(GContext *ctx, const Layer *cell_layer, uint
 
 void main_menu_draw_row_callback(GContext *ctx, const Layer *cell_layer, MenuIndex *cell_index, void *data) {
   const char *items[3][3] = {
-    {"Now playing", "Jump back in", "Made for you"},
+    {"Jump back in", "Made for you", ""},
     {"Playlists", "Albums", "Artists"},
     {"Play on device", "", ""}
   };
@@ -97,9 +97,11 @@ void main_menu_draw_row_callback(GContext *ctx, const Layer *cell_layer, MenuInd
 void main_menu_select_callback(MenuLayer *menu_layer, MenuIndex *cell_index, void *data) {
   // Handle menu selection
   if (cell_index->section == 0 && cell_index->row == 0) {
-    // Now playing selected
-    s_app_data.current_state = APP_STATE_NOW_PLAYING;
-    now_playing_window_create();
+    // Jump back in selected
+    // TODO: Implement jump back in functionality
+  } else if (cell_index->section == 0 && cell_index->row == 1) {
+    // Made for you selected
+    // TODO: Implement made for you functionality
   } else if (cell_index->section == 1 && cell_index->row == 0) {
     // Playlists selected
     s_app_data.current_state = APP_STATE_PLAYLISTS;
